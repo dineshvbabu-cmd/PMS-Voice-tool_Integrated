@@ -60,6 +60,9 @@ function findDescription(text) {
 
 function cleanKeyword(value) {
   return String(value || "")
+    .replace(/\bvessel\s+/i, "")
+    .replace(/\bwhich\s+is\b.*$/i, "")
+    .replace(/\bthat\s+is\b.*$/i, "")
     .replace(/\b(in the next|next|coming due|overdue|due|status|with|for|on|and|show|list|find|track|please|all|open|closed|critical|non critical|non-critical|detail|details)\b.*$/i, "")
     .replace(/^[^a-z0-9]+|[^a-z0-9]+$/gi, "")
     .trim();
@@ -160,6 +163,20 @@ function findPriorityHint(text) {
 
   if (containsAny(normalized, ["normal priority", "routine", "non critical", "non-critical"])) {
     return "normal";
+  }
+
+  return "";
+}
+
+function findRequisitionMode(text) {
+  const normalized = normalize(text);
+
+  if (containsAny(normalized, ["spare", "spares", "store", "stores", "material", "materials"])) {
+    return "stores";
+  }
+
+  if (containsAny(normalized, ["service", "services", "survey", "inspection", "vendor", "dockyard"])) {
+    return "services";
   }
 
   return "";
@@ -420,6 +437,26 @@ function routeLocally(query) {
     };
   }
 
+  if (text.includes("close") || text.includes("complete")) {
+    return {
+      action: "close_job",
+      normalizedEnglish: query,
+      params: {
+        jobId,
+        completionDate: date,
+        closureDescription: description,
+        keyword,
+        overdueOnly: text.includes("overdue"),
+        dueOnly:
+          !text.includes("overdue") &&
+          (containsAny(text, ["coming due", "due soon", "next week", "next month", "this week", "this month", "tomorrow"]) ||
+            /\bdue\b/.test(text)),
+        criticalOnly: text.includes("critical") && !text.includes("non critical"),
+        nonCriticalOnly: containsAny(text, ["non critical", "non-critical", "normal jobs", "routine jobs"])
+      }
+    };
+  }
+
   if ((text.includes("postpone") || text.includes("defer")) && jobId) {
     const postponeFrequency = findNumberLike(query, /(?:frequency|interval)\s*[:#-]?\s*(\d+(?:\.\d+)?)/i);
     const postponeDate =
@@ -437,6 +474,27 @@ function routeLocally(query) {
         remarks: description,
         approvedBy: findNumberLike(query, /(?:approved\s+by|approver|line\s+manager)\s*(?:id)?\s*[:#-]?\s*(\d+)/i),
         currentDueDate: firstMatch(query, /current\s+due\s+date\s*[:\-]?\s*(\d{4}-\d{2}-\d{2})/i)
+      }
+    };
+  }
+
+  if (text.includes("postpone") || text.includes("defer")) {
+    return {
+      action: "postponement",
+      normalizedEnglish: query,
+      params: {
+        jobId,
+        postponeMode: date ? "Date" : "",
+        postponeDate: date,
+        remarks: description,
+        keyword,
+        overdueOnly: text.includes("overdue"),
+        dueOnly:
+          !text.includes("overdue") &&
+          (containsAny(text, ["coming due", "due soon", "next week", "next month", "this week", "this month", "tomorrow"]) ||
+            /\bdue\b/.test(text)),
+        criticalOnly: text.includes("critical") && !text.includes("non critical"),
+        nonCriticalOnly: containsAny(text, ["non critical", "non-critical", "normal jobs", "routine jobs"])
       }
     };
   }
@@ -869,6 +927,16 @@ async function resolvePmsJobContext(client, session, jobReference) {
     row,
     detailResult,
     rowResult
+  };
+}
+
+async function findCandidateMaintenanceJobs(client, session, params = {}) {
+  const result = await client.listDueJobs("pms", session, buildPmsForecastQuery(params));
+  const rows = result.ok ? applyMaintenanceFilters(Array.isArray(result.body?.data) ? result.body.data : [], params) : [];
+
+  return {
+    result,
+    rows
   };
 }
 
@@ -1866,6 +1934,35 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
       };
     }
 
+    if (!routed.params?.jobId) {
+      const search = await findCandidateMaintenanceJobs(client, effectiveSession, routed.params || {});
+      if (!search.result.ok) {
+        return buildDraftResult(
+          "Close maintenance draft",
+          normalizedEnglish,
+          summarizeResult(search.result),
+          routed.params || {},
+          ["shipComponentJobLinkId"],
+          buildPayloadPresentation("Close maintenance draft", summarizeResult(search.result), routed.params || {}, ["shipComponentJobLinkId"], "close_job")
+        );
+      }
+
+      if (search.rows.length !== 1) {
+        return {
+          intent: "Select maintenance job",
+          normalizedEnglish,
+          reply:
+            search.rows.length > 1
+              ? "I found multiple matching live maintenance jobs. Select the correct job below, then use the row action to close it."
+              : "I could not identify a specific job to close from that request. Try naming the exact job, vessel, or due state.",
+          result: search.result,
+          presentation: buildMaintenancePresentation(search.result, routed.params || {})
+        };
+      }
+
+      routed.params.jobId = String(search.rows[0].shipComponentJobLinkId || "");
+    }
+
     const context = await resolvePmsJobContext(client, effectiveSession, routed.params?.jobId || "");
     if (!context.ok) {
       return buildDraftResult(
@@ -1927,6 +2024,35 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
         result: null,
         presentation: null
       };
+    }
+
+    if (!routed.params?.jobId) {
+      const search = await findCandidateMaintenanceJobs(client, effectiveSession, routed.params || {});
+      if (!search.result.ok) {
+        return buildDraftResult(
+          "Postponement draft",
+          normalizedEnglish,
+          summarizeResult(search.result),
+          routed.params || {},
+          ["shipComponentJobLinkId"],
+          buildPayloadPresentation("Postponement draft", summarizeResult(search.result), routed.params || {}, ["shipComponentJobLinkId"], "postponement")
+        );
+      }
+
+      if (search.rows.length !== 1) {
+        return {
+          intent: "Select maintenance job",
+          normalizedEnglish,
+          reply:
+            search.rows.length > 1
+              ? "I found multiple matching live maintenance jobs. Select the correct job below, then use the row action to postpone it."
+              : "I could not identify a specific job to postpone from that request. Try naming the exact job, vessel, or due state.",
+          result: search.result,
+          presentation: buildMaintenancePresentation(search.result, routed.params || {})
+        };
+      }
+
+      routed.params.jobId = String(search.rows[0].shipComponentJobLinkId || "");
     }
 
     const context = await resolvePmsJobContext(client, effectiveSession, routed.params?.jobId || "");
