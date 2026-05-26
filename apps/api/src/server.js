@@ -196,7 +196,7 @@ function currentBootstrap(req) {
     discoveredFacts: [
       "Live Mazik auth calls are wired into this backend.",
       "Maintenance forecast and requisition tracking endpoints are preloaded from live captures.",
-      "Write endpoints remain configurable until final confirmation.",
+      "Close job, postponement, and requisition-create endpoints are now preloaded from live captures.",
       "Frontend and backend can now deploy independently on Railway."
     ],
     samplePrompts

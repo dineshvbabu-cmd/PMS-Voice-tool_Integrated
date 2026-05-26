@@ -77,18 +77,24 @@ Frontend variables are documented in:
   - live path probing
   - captured route inventory browsing
   - connector settings
+- live captured write endpoints for:
+  - maintenance completion
+  - maintenance postponement
+  - purchase requisition create
 
 ## What Still Needs Final Live Confirmation
 
-Write endpoints still need final authenticated confirmation before we can make production actions live:
+The backend now submits real live requests for:
 
-- close maintenance
-- create postponement
+- close maintenance, when the required Mazik fields are present
+- create postponement, when the required Mazik fields are present
+- create requisition, when the full Mazik requisition payload is supplied
+
+It still returns structured drafts for:
+
 - create defect
-- create requisition
 - submit procurement workflow action
-
-Until then, the backend returns structured drafts for unconfirmed write actions.
+- any close/postpone/requisition request that is missing required live fields
 
 ## Railway
 

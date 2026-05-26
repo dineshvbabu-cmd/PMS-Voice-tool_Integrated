@@ -14,15 +14,17 @@ function createSettings() {
       process.env.PMSLINK_DUE_JOBS_PATH || "ShipMaster/shipMaintenanceDirectCompleteBySP",
     pmsJobDetailPath:
       process.env.PMSLINK_JOB_DETAIL_PATH || "ShipMaster/shipMaintenanceForecastById/{jobId}",
-    pmsCloseJobPath: process.env.PMSLINK_CLOSE_JOB_PATH || "",
-    pmsPostponementPath: process.env.PMSLINK_POSTPONEMENT_PATH || "",
+    pmsCloseJobPath:
+      process.env.PMSLINK_CLOSE_JOB_PATH || "ShipMaster/jobPlanDirectSubmit",
+    pmsPostponementPath: process.env.PMSLINK_POSTPONEMENT_PATH || "ShipMaster/postponeJob",
     pmsRequisitionPath: process.env.PMSLINK_REQUISITION_PATH || "",
     purchaseWebBaseUrl: process.env.PURCHASELINK_WEB_BASE || "https://pclink.maziksolutions.com/",
     purchaseApiBaseUrl:
       process.env.PURCHASELINK_API_BASE || "https://livepmsapi.maziksolutions.com/api/",
     purchaseRequisitionTrackingUrl:
       process.env.PURCHASELINK_TRACKING_URL || "https://pclink.maziksolutions.com/Requisition/RequisitionTracking",
-    purchaseRequisitionPath: process.env.PURCHASELINK_REQUISITION_PATH || "",
+    purchaseRequisitionPath:
+      process.env.PURCHASELINK_REQUISITION_PATH || "PMRequisitionMaster/addRequisitionMaster",
     purchaseFollowupPath:
       process.env.PURCHASELINK_FOLLOWUP_PATH || "PMRequisitionMaster/purchaseTracksLists",
     openAiLanguageModel: process.env.OPENAI_LANGUAGE_MODEL || "gpt-5.4-mini",

@@ -143,10 +143,17 @@ class PMSLinkClient {
       headers["Content-Type"] = "application/json";
     }
 
+    let requestBody;
+    if (options.formData) {
+      requestBody = options.formData;
+    } else if (options.body !== undefined) {
+      requestBody = JSON.stringify(options.body);
+    }
+
     const response = await fetch(url, {
       method: options.method || "GET",
       headers,
-      body: options.body !== undefined ? JSON.stringify(options.body) : undefined
+      body: requestBody
     });
 
     const parsed = await parseApiResponse(response);
@@ -175,23 +182,25 @@ class PMSLinkClient {
   }
 
   async closeJob(systemKey, session, jobId, payload) {
-    const endpointPath = String(this.settings.pmsCloseJobPath || "").replace(
-      "{jobId}",
-      encodeURIComponent(jobId)
-    );
+    const endpointPath = String(this.settings.pmsCloseJobPath || "");
+    const formData = new FormData();
+    formData.append("data", JSON.stringify([payload]));
 
     return this.request(systemKey, endpointPath, {
-      method: "PUT",
+      method: "POST",
       session,
-      body: payload
+      formData
     });
   }
 
   async createPostponement(systemKey, session, payload) {
+    const formData = new FormData();
+    formData.append("data", JSON.stringify(payload));
+
     return this.request(systemKey, this.settings.pmsPostponementPath, {
       method: "POST",
       session,
-      body: payload
+      formData
     });
   }
 

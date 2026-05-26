@@ -55,10 +55,12 @@ type InventoryResponse = {
   liveEndpoints: {
     pms: {
       read: InventoryEndpoint[];
+      write: InventoryEndpoint[];
       support: string[];
     };
     purchase: {
       read: InventoryEndpoint[];
+      write: InventoryEndpoint[];
       support: string[];
     };
   };
@@ -281,6 +283,8 @@ function App() {
   const currentSession = bootstrap?.session?.[systemKey] || null;
   const endpointSuggestions =
     systemKey === "purchase" ? inventory?.liveEndpoints.purchase.read || [] : inventory?.liveEndpoints.pms.read || [];
+  const writeSuggestions =
+    systemKey === "purchase" ? inventory?.liveEndpoints.purchase.write || [] : inventory?.liveEndpoints.pms.write || [];
 
   const routeSummary =
     systemKey === "purchase"
@@ -346,6 +350,13 @@ function App() {
             <div>
               <strong>{endpointSuggestions.length}</strong>
               <span>Live endpoint suggestions</span>
+            </div>
+          </div>
+          <div className="stat-tile">
+            <Send size={18} />
+            <div>
+              <strong>{writeSuggestions.length}</strong>
+              <span>Live write actions captured</span>
             </div>
           </div>
         </div>
@@ -563,6 +574,29 @@ function App() {
                     </div>
                     <ArrowUpRight size={16} />
                   </button>
+                ))}
+              </div>
+            </article>
+
+            <article className="panel">
+              <div className="panel-header">
+                <div>
+                  <p className="eyebrow">Write Actions</p>
+                  <h3>Captured live write endpoints</h3>
+                </div>
+              </div>
+
+              <div className="inventory-list">
+                {writeSuggestions.map((endpoint) => (
+                  <div key={endpoint.key} className="inventory-item">
+                    <div>
+                      <strong>{endpoint.label}</strong>
+                      <span>
+                        {endpoint.method} {endpoint.path}
+                      </span>
+                    </div>
+                    <ArrowUpRight size={16} />
+                  </div>
                 ))}
               </div>
             </article>

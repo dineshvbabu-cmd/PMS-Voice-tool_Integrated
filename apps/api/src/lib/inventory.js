@@ -128,6 +128,22 @@ const liveEndpoints = {
         notes: "Used by filters and vessel selectors."
       }
     ],
+    write: [
+      {
+        key: "closeJob",
+        label: "Maintenance completion submit",
+        method: "POST",
+        path: "ShipMaster/jobPlanDirectSubmit",
+        notes: "Captured from the maintenance forecast completion modal on May 26, 2026."
+      },
+      {
+        key: "postponeJob",
+        label: "Maintenance postponement submit",
+        method: "POST",
+        path: "ShipMaster/postponeJob",
+        notes: "Captured from the postpone jobs modal on May 26, 2026."
+      }
+    ],
     support: [
       "UserManagement/accessrightbyurl/{userId}/maintenanceForecast/PMS",
       "UserManagement/Users/0",
@@ -168,6 +184,15 @@ const liveEndpoints = {
         notes: "Linked delivery fields for requisition detail."
       }
     ],
+    write: [
+      {
+        key: "createRequisition",
+        label: "Requisition create",
+        method: "POST",
+        path: "PMRequisitionMaster/addRequisitionMaster",
+        notes: "Captured from the requisition save flow on May 26, 2026."
+      }
+    ],
     support: [
       "UserManagement/accessrightbyurlss/{userId}/Purchase",
       "UserManagement/accessrightbyurl/{userId}/RequisitionTracking/Purchase",
@@ -184,7 +209,9 @@ const samplePrompts = [
   "Show postponed jobs awaiting approval for Alkebulan.",
   "List requisitions in PO SEND status for Alkebulan.",
   "Show the workflow log for requisition 17209.",
-  "Prepare a closure draft for WO-24088 completed on 2026-05-26."
+  "Close ship component job link 82225 completed on 2026-05-26 with remarks valve checked satisfactory.",
+  "Postpone ship component job link 82225 until 2026-06-10 with reason 5, approver 152, and remarks awaiting spares.",
+  "Create requisition with payload {\"Requisition\":{\"vesselId\":203,\"description\":\"Class occasional survey service\"},\"items\":[],\"templateItems\":[],\"workflow\":\"1\"}."
 ];
 
 module.exports = {
