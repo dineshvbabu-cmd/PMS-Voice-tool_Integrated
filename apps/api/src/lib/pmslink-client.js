@@ -228,6 +228,32 @@ class PMSLinkClient {
     return this.request(systemKey, endpointPath, { session, query });
   }
 
+  async listVessels(systemKey, session) {
+    return this.request(systemKey, "VesselManagement/vessels/0", { session });
+  }
+
+  async listPreferenceTypes(systemKey, session) {
+    return this.request(systemKey, "pmPurchaseMaster/filterPreferenceType/0", { session });
+  }
+
+  async listServiceTypes(systemKey, session) {
+    return this.request(systemKey, "pmPurchaseMaster/filtervendorServiceType/0", { session });
+  }
+
+  async listCartItems(systemKey, session) {
+    return this.request(systemKey, "ShipMaster/filterCartItemsInfo/0/0", { session });
+  }
+
+  async getDisplayCartItems(systemKey, session, ids, vesselId) {
+    return this.request(systemKey, "PMRequisitionMaster/getDisplayCartItems", {
+      session,
+      query: {
+        Ids: Array.isArray(ids) ? ids.join(",") : String(ids || ""),
+        VesselId: vesselId || 0
+      }
+    });
+  }
+
   async getRequisitionDetail(systemKey, session, requisitionId) {
     return this.request(systemKey, `PMRequisitionMaster/getRequisitionMasterById/${encodeURIComponent(requisitionId)}`, {
       session

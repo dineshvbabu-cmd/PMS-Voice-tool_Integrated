@@ -1384,6 +1384,163 @@ function buildRequisitionPayload(params) {
   };
 }
 
+function findById(items, id, candidateKeys = ["id", "value", "vesselId", "preferenceTypeId", "serviceTypeId"]) {
+  if (id === null || id === undefined || id === "") {
+    return null;
+  }
+
+  const target = String(id);
+  return (items || []).find((item) => candidateKeys.some((key) => String(item?.[key] ?? "") === target)) || null;
+}
+
+function findByKeyword(items, keyword, candidateKeys = ["vesselName", "description", "name", "serviceTypeName"]) {
+  if (!keyword) {
+    return null;
+  }
+
+  const target = normalizeLoose(keyword);
+  return (
+    (items || []).find((item) =>
+      candidateKeys.some((key) => normalizeLoose(item?.[key] || "").includes(target))
+    ) || null
+  );
+}
+
+function itemPreviewText(item) {
+  if (!item || typeof item !== "object") {
+    return "";
+  }
+
+  return firstNonEmpty(
+    item.componentName,
+    item.itemName,
+    item.serviceDescription,
+    item.sparePartName,
+    item.materialName,
+    item.description,
+    item.sd,
+    item.cn,
+    item.sn
+  );
+}
+
+function collectCartIds(payload) {
+  const sections = [payload?.items, payload?.templateItems];
+  const ids = [];
+
+  sections.forEach((section) => {
+    if (!Array.isArray(section)) {
+      return;
+    }
+
+    section.forEach((entry) => {
+      const candidate = entry?.cartId || entry?.cartItemId || entry?.id;
+      if (candidate !== null && candidate !== undefined && candidate !== "") {
+        ids.push(candidate);
+      }
+    });
+  });
+
+  return ids;
+}
+
+async function buildRequisitionDraftContext(client, session, params, payload) {
+  const requisition = payload?.Requisition || {};
+  const context = {
+    description: firstNonEmpty(requisition.description, params?.description, params?.title),
+    workflow: String(payload?.workflow || ""),
+    linkedJobId: firstNonEmpty(requisition.linkedJobId, params?.linkedJobId),
+    itemCount: String(Array.isArray(payload?.items) ? payload.items.length : 0),
+    templateItemCount: String(Array.isArray(payload?.templateItems) ? payload.templateItems.length : 0)
+  };
+
+  const [vesselsResult, preferenceResult, serviceTypeResult] = await Promise.all([
+    client.listVessels("purchase", session).catch(() => null),
+    client.listPreferenceTypes("purchase", session).catch(() => null),
+    client.listServiceTypes("purchase", session).catch(() => null)
+  ]);
+
+  const vessels = Array.isArray(unwrapResultData(vesselsResult)) ? unwrapResultData(vesselsResult) : [];
+  const priorities = Array.isArray(unwrapResultData(preferenceResult)) ? unwrapResultData(preferenceResult) : [];
+  const serviceTypes = Array.isArray(unwrapResultData(serviceTypeResult)) ? unwrapResultData(serviceTypeResult) : [];
+
+  const resolvedVessel =
+    findById(vessels, requisition.vesselId, ["vesselId", "id"]) ||
+    findByKeyword(vessels, params?.keyword || params?.description || "", ["vesselName", "vesselCode"]);
+  const resolvedPriority = findById(
+    priorities,
+    requisition.preferenceTypeId || requisition.priorityId,
+    ["preferenceTypeId", "id"]
+  );
+  const resolvedServiceType = findById(
+    serviceTypes,
+    requisition.serviceTypeId || requisition.orderTypeId,
+    ["serviceTypeId", "orderTypesId", "id"]
+  );
+
+  context.vessel = firstNonEmpty(resolvedVessel?.vesselName, requisition.vesselName, requisition.vesselId);
+  context.priority = firstNonEmpty(
+    resolvedPriority?.description,
+    requisition.priorityName,
+    requisition.priorityId || requisition.preferenceTypeId
+  );
+  context.serviceType = firstNonEmpty(
+    resolvedServiceType?.serviceTypeName,
+    resolvedServiceType?.description,
+    requisition.serviceTypeName,
+    requisition.orderTypeId
+  );
+
+  if (!context.vessel && vessels.length) {
+    context.availableVessels = vessels
+      .slice(0, 6)
+      .map((entry) => firstNonEmpty(entry?.vesselName, entry?.vesselCode))
+      .filter(Boolean)
+      .join(", ");
+  }
+
+  if (!context.priority && priorities.length) {
+    context.availablePriorities = priorities
+      .slice(0, 5)
+      .map((entry) => firstNonEmpty(entry?.description, entry?.preferenceTypeName))
+      .filter(Boolean)
+      .join(", ");
+  }
+
+  if (!context.serviceType && serviceTypes.length) {
+    context.availableServiceTypes = serviceTypes
+      .slice(0, 5)
+      .map((entry) => firstNonEmpty(entry?.serviceTypeName, entry?.description))
+      .filter(Boolean)
+      .join(", ");
+  }
+
+  const directItemPreview = []
+    .concat(Array.isArray(payload?.items) ? payload.items : [])
+    .concat(Array.isArray(payload?.templateItems) ? payload.templateItems : [])
+    .map((entry) => itemPreviewText(entry))
+    .filter(Boolean);
+
+  if (directItemPreview.length) {
+    context.itemPreview = directItemPreview.slice(0, 4).join(", ");
+  }
+
+  const cartIds = collectCartIds(payload);
+  if (cartIds.length) {
+    const displayResult = await client
+      .getDisplayCartItems("purchase", session, cartIds, requisition.vesselId || resolvedVessel?.vesselId || 0)
+      .catch(() => null);
+    const displayItems = Array.isArray(unwrapResultData(displayResult)) ? unwrapResultData(displayResult) : [];
+    const displayPreview = displayItems.map((entry) => itemPreviewText(entry)).filter(Boolean);
+    if (displayPreview.length) {
+      context.cartItems = displayPreview.slice(0, 6).join(", ");
+      context.itemCount = String(displayItems.length);
+    }
+  }
+
+  return context;
+}
+
 function buildDraftResult(intent, normalizedEnglish, reply, payload, missingFields, presentation) {
   return {
     intent,
@@ -1836,19 +1993,21 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
     }
 
     const { payload, missingFields } = buildRequisitionPayload(routed.params || {});
+    const draftContext = await buildRequisitionDraftContext(client, effectiveSession, routed.params || {}, payload).catch(() => ({}));
     if (missingFields.length) {
       return buildDraftResult(
         "Requisition draft",
         normalizedEnglish,
-        "The live Mazik requisition endpoint is wired, but it needs the full `Requisition/items/templateItems/workflow` payload. Include that JSON in your request and I can submit it.",
+        "I prepared a requisition draft from your request. Review the resolved vessel, service, and item context below, then add the remaining requisition structure if you want me to submit it.",
         payload,
         missingFields,
         buildPayloadPresentation(
           "Requisition draft",
-          "Review the parsed requisition payload and supply the full Mazik structure.",
+          "Review the requisition draft and supply the remaining fields before submission.",
           payload,
           missingFields,
-          "requisition_create"
+          "requisition_create",
+          draftContext
         )
       );
     }
@@ -1856,7 +2015,7 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
     return buildPendingConfirmation(
       "Requisition ready",
       normalizedEnglish,
-      `${autoRoutedNotice}I parsed the requisition payload. Confirm in the UI to submit it to Mazik.`.trim(),
+      `${autoRoutedNotice}I prepared the requisition with resolved business context. Confirm in the UI after checking the vessel, service, and item details.`.trim(),
       {
         action: "requisition_create",
         systemKey: effectiveSystemKey,
@@ -1864,10 +2023,11 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
       },
       buildPayloadPresentation(
         "Requisition ready",
-        "Review and confirm this requisition payload before it is submitted to Mazik.",
+        "Review and confirm this requisition draft before it is submitted to Mazik.",
         payload,
         [],
-        "requisition_create"
+        "requisition_create",
+        draftContext
       )
     );
   }

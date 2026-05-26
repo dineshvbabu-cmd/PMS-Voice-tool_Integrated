@@ -201,6 +201,13 @@ function formatDate(value?: string | null) {
   return date.toISOString().slice(0, 10);
 }
 
+function formatContextLabel(key: string) {
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 function interpolateTemplate(template: string, row?: TableRow | null) {
   const today = new Date();
   const plus30 = new Date(today);
@@ -915,7 +922,7 @@ function App() {
                 {Object.entries(presentation.context).map(([key, value]) => (
                   value ? (
                     <div key={key} className="detail-card">
-                      <span>{key}</span>
+                      <span>{formatContextLabel(key)}</span>
                       <strong>{value}</strong>
                     </div>
                   ) : null
