@@ -4,12 +4,15 @@ function trimSlash(value, direction) {
   if (!value) {
     return "";
   }
+
   if (direction === "left") {
     return String(value).replace(/^\/+/, "");
   }
+
   if (direction === "right") {
     return String(value).replace(/\/+$/, "");
   }
+
   return String(value).replace(/^\/+|\/+$/g, "");
 }
 
@@ -19,11 +22,13 @@ function joinUrl(baseUrl, endpointPath) {
 
 function buildUrl(baseUrl, endpointPath, query) {
   const url = new URL(joinUrl(baseUrl, endpointPath));
+
   Object.entries(query || {}).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== "") {
       url.searchParams.set(key, String(value));
     }
   });
+
   return url.toString();
 }
 
@@ -31,6 +36,7 @@ function collectSetCookies(headers) {
   if (typeof headers.getSetCookie === "function") {
     return headers.getSetCookie();
   }
+
   const single = headers.get("set-cookie");
   return single ? [single] : [];
 }
@@ -45,6 +51,7 @@ function cookieHeader(setCookies) {
 async function parseApiResponse(response) {
   const text = await response.text();
   let parsed = text;
+
   try {
     parsed = text ? JSON.parse(text) : {};
   } catch {
@@ -79,10 +86,6 @@ class PMSLinkClient {
       webBaseUrl: this.settings.pmsWebBaseUrl,
       landingUrl: this.settings.pmsMaintenanceForecastUrl
     };
-  }
-
-  get apiBaseUrl() {
-    return this.settings.pmsApiBaseUrl;
   }
 
   async login(systemKey, username, password) {
@@ -155,8 +158,7 @@ class PMSLinkClient {
   }
 
   async probe(systemKey, pathName, session, query) {
-    const endpointPath = this.settings[pathName];
-    return this.request(systemKey, endpointPath, { session, query });
+    return this.request(systemKey, this.settings[pathName], { session, query });
   }
 
   async listDueJobs(systemKey, session, query) {
@@ -164,14 +166,20 @@ class PMSLinkClient {
   }
 
   async getJobDetail(systemKey, session, jobId) {
-    const pathTemplate = this.settings.pmsJobDetailPath || "";
-    const endpointPath = pathTemplate.replace("{jobId}", encodeURIComponent(jobId));
+    const endpointPath = String(this.settings.pmsJobDetailPath || "").replace(
+      "{jobId}",
+      encodeURIComponent(jobId)
+    );
+
     return this.request(systemKey, endpointPath, { session });
   }
 
   async closeJob(systemKey, session, jobId, payload) {
-    const pathTemplate = this.settings.pmsCloseJobPath || "";
-    const endpointPath = pathTemplate.replace("{jobId}", encodeURIComponent(jobId));
+    const endpointPath = String(this.settings.pmsCloseJobPath || "").replace(
+      "{jobId}",
+      encodeURIComponent(jobId)
+    );
+
     return this.request(systemKey, endpointPath, {
       method: "PUT",
       session,
@@ -188,9 +196,8 @@ class PMSLinkClient {
   }
 
   async createRequisition(systemKey, session, payload) {
-    const endpointPath = systemKey === "purchase"
-      ? this.settings.purchaseRequisitionPath
-      : this.settings.pmsRequisitionPath;
+    const endpointPath =
+      systemKey === "purchase" ? this.settings.purchaseRequisitionPath : this.settings.pmsRequisitionPath;
 
     return this.request(systemKey, endpointPath, {
       method: "POST",
@@ -200,10 +207,7 @@ class PMSLinkClient {
   }
 
   async procurementFollowUp(systemKey, session, query) {
-    const endpointPath = systemKey === "purchase"
-      ? this.settings.purchaseFollowupPath
-      : this.settings.purchaseFollowupPath;
-
+    const endpointPath = this.settings.purchaseFollowupPath;
     return this.request(systemKey, endpointPath, { session, query });
   }
 }

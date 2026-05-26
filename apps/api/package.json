@@ -1,0 +1,11 @@
+{
+  "name": "@pms-voice/api",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Mazik PMS and Purchase integration API.",
+  "scripts": {
+    "dev": "node src/server.js",
+    "start": "node src/server.js",
+    "check": "node --check src/server.js && node --check src/lib/pmslink-client.js && node --check src/lib/copilot.js && node --check src/lib/inventory.js && node --check src/lib/settings.js"
+  }
+}

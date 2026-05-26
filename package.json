@@ -1,10 +1,15 @@
 {
-  "name": "mazik-pms-copilot-connector",
-  "version": "0.1.0",
+  "name": "pms-voice-tool-integrated",
   "private": true,
-  "description": "Real connector starter for PMS Link and procurement-backed copilot flows.",
+  "version": "0.2.0",
+  "description": "Integrated Mazik PMS and Purchase copilot monorepo.",
+  "workspaces": [
+    "apps/*"
+  ],
   "scripts": {
-    "start": "node server.js",
-    "check": "node --check server.js && node --check lib/pmslink-client.js && node --check lib/copilot.js && node --check public/app.js"
+    "dev:api": "npm run dev --workspace @pms-voice/api",
+    "dev:web": "npm run dev --workspace @pms-voice/web",
+    "build": "npm run build --workspaces --if-present",
+    "check": "npm run check --workspaces --if-present"
   }
 }

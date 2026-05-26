@@ -8,7 +8,7 @@ function normalize(text) {
 }
 
 function findJobId(text) {
-  const match = String(text || "").match(/wo[-\s]?\d+/i);
+  const match = String(text || "").match(/(?:wo[-\s]?\d+|\b\d{4,6}\b)/i);
   return match ? match[0].toUpperCase().replace(/\s+/, "-") : "";
 }
 
@@ -18,11 +18,11 @@ function findDate(text) {
 }
 
 function findDescription(text) {
-  const match = String(text || "").match(/(?:description|notes?|because)\s*[:\-]?\s*(.+)$/i);
+  const match = String(text || "").match(/(?:description|notes?|because|reason)\s*[:\-]?\s*(.+)$/i);
   return match ? match[1].trim() : "";
 }
 
-async function routeWithOpenAI(query) {
+async function routeWithOpenAI(query, systemKey) {
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -38,8 +38,9 @@ async function routeWithOpenAI(query) {
           role: "system",
           content: [
             "You route maritime PMS and procurement requests.",
-            "Return strict JSON with keys action, normalizedEnglish, params.",
-            "Supported actions are due_jobs, job_detail, close_job, postponement, requisition, procurement_followup, probe, help."
+            "Return strict JSON with keys action, normalizedEnglish, params, explanation.",
+            "Supported actions are due_jobs, job_detail, close_job, postponement, requisition, procurement_followup, help.",
+            `The active system is ${systemKey === "purchase" ? "Purchase Link" : "PMS Link"}.`
           ].join(" ")
         },
         {
@@ -72,7 +73,7 @@ function routeLocally(query) {
     };
   }
 
-  if (text.includes("detail") || text.includes("instruction") || text.includes("read job")) {
+  if (text.includes("detail") || text.includes("instruction") || text.includes("read job") || text.includes("read maintenance")) {
     return {
       action: "job_detail",
       normalizedEnglish: query,
@@ -104,7 +105,7 @@ function routeLocally(query) {
     };
   }
 
-  if (text.includes("requisition") || text.includes("raise req")) {
+  if (text.includes("requisition") || text.includes("raise req") || text.includes("raise purchase")) {
     return {
       action: "requisition",
       normalizedEnglish: query,
@@ -123,14 +124,6 @@ function routeLocally(query) {
     };
   }
 
-  if (text.includes("probe")) {
-    return {
-      action: "probe",
-      normalizedEnglish: query,
-      params: {}
-    };
-  }
-
   return {
     action: "due_jobs",
     normalizedEnglish: query,
@@ -138,20 +131,41 @@ function routeLocally(query) {
   };
 }
 
-async function routePrompt(query) {
+async function routePrompt(query, systemKey) {
   if (!OPENAI_API_KEY) {
     return routeLocally(query);
   }
 
   try {
-    return await routeWithOpenAI(query);
+    return await routeWithOpenAI(query, systemKey);
   } catch {
     return routeLocally(query);
   }
 }
 
+function summarizeResult(result) {
+  if (!result) {
+    return "No result returned.";
+  }
+
+  if (!result.ok) {
+    return result.body?.error || result.rawText || "The endpoint did not return a successful response.";
+  }
+
+  const rows = Array.isArray(result.body?.data) ? result.body.data.length : null;
+  if (rows !== null) {
+    return `Request succeeded and returned ${rows} rows.`;
+  }
+
+  if (result.body?.data && typeof result.body.data === "object") {
+    return "Request succeeded and returned a detailed record.";
+  }
+
+  return "Request succeeded.";
+}
+
 async function executeCopilotQuery({ client, session, query, systemKey }) {
-  const routed = await routePrompt(query);
+  const routed = await routePrompt(query, systemKey);
   const action = routed.action || "help";
   const targetSystem = systemKey === "purchase" ? "Purchase Link" : "PMS Link";
 
@@ -159,9 +173,10 @@ async function executeCopilotQuery({ client, session, query, systemKey }) {
     return {
       intent: "Capabilities",
       normalizedEnglish: routed.normalizedEnglish || query,
-      reply: systemKey === "purchase"
-        ? "I can log into Purchase Link, probe requisition and follow-up endpoints, raise requisitions, and track procurement workflows once the live paths are configured."
-        : "I can log into PMS Link, probe maintenance endpoints, fetch due jobs, read a job detail, close a job, raise a postponement, and raise connected requisitions once the live paths are configured.",
+      reply:
+        systemKey === "purchase"
+          ? "I can inspect requisition tracking, workflow logs, delivery details, and procurement follow-up from Purchase Link."
+          : "I can inspect maintenance forecast data, read maintenance detail, and prepare close or postponement actions for PMS Link.",
       result: null
     };
   }
@@ -170,40 +185,26 @@ async function executeCopilotQuery({ client, session, query, systemKey }) {
     return {
       intent: "Authentication required",
       normalizedEnglish: routed.normalizedEnglish || query,
-      reply: "Log into PMS Link first so I can call the live Mazik API.",
+      reply: `Log into ${targetSystem} first so I can call the live Mazik API.`,
       result: null
-    };
-  }
-
-  if (action === "probe") {
-    const result = await client.probe(systemKey, systemKey === "purchase" ? "purchaseRequisitionPath" : "pmsDueJobsPath", session, {});
-    return {
-      intent: "Endpoint probe",
-      normalizedEnglish: routed.normalizedEnglish || query,
-      reply: result.ok
-        ? "The configured due-jobs endpoint responded successfully."
-        : "The configured due-jobs endpoint did not return a successful response.",
-      result
     };
   }
 
   if (action === "job_detail") {
     if (systemKey === "purchase") {
       return {
-        intent: "Job detail",
+        intent: "Maintenance detail",
         normalizedEnglish: routed.normalizedEnglish || query,
-        reply: "Job-detail lookups belong to PMS Link. Switch the target system to PMS Link for maintenance drill-down.",
+        reply: "Maintenance drill-down belongs to PMS Link. Switch the active system to PMS Link for this request.",
         result: null
       };
     }
 
     const result = await client.getJobDetail(systemKey, session, routed.params?.jobId || "");
     return {
-      intent: "Job detail",
+      intent: "Maintenance detail",
       normalizedEnglish: routed.normalizedEnglish || query,
-      reply: result.ok
-        ? `Fetched detail for ${routed.params?.jobId || "the selected job"}.`
-        : "I could not fetch that job detail from the configured PMS Link endpoint.",
+      reply: summarizeResult(result),
       result
     };
   }
@@ -211,10 +212,26 @@ async function executeCopilotQuery({ client, session, query, systemKey }) {
   if (action === "close_job") {
     if (systemKey === "purchase") {
       return {
-        intent: "Close job",
+        intent: "Close maintenance",
         normalizedEnglish: routed.normalizedEnglish || query,
-        reply: "Job closure belongs to PMS Link. Switch the target system to PMS Link for maintenance completion workflows.",
+        reply: "Maintenance completion belongs to PMS Link. Switch the active system to PMS Link for this request.",
         result: null
+      };
+    }
+
+    if (!client.settings.pmsCloseJobPath) {
+      return {
+        intent: "Close maintenance draft",
+        normalizedEnglish: routed.normalizedEnglish || query,
+        reply: "The live close-job endpoint is not configured yet, so I prepared a draft payload instead.",
+        result: {
+          draft: true,
+          payload: {
+            jobId: routed.params?.jobId || "",
+            completedDate: routed.params?.completionDate || "",
+            closureDescription: routed.params?.closureDescription || ""
+          }
+        }
       };
     }
 
@@ -223,11 +240,9 @@ async function executeCopilotQuery({ client, session, query, systemKey }) {
       closureDescription: routed.params?.closureDescription || ""
     });
     return {
-      intent: "Close job",
+      intent: "Close maintenance",
       normalizedEnglish: routed.normalizedEnglish || query,
-      reply: result.ok
-        ? `Submitted closure request for ${routed.params?.jobId || "the selected job"}.`
-        : "I could not submit that closure request to PMS Link.",
+      reply: summarizeResult(result),
       result
     };
   }
@@ -237,8 +252,20 @@ async function executeCopilotQuery({ client, session, query, systemKey }) {
       return {
         intent: "Postponement",
         normalizedEnglish: routed.normalizedEnglish || query,
-        reply: "Postponement requests belong to PMS Link. Switch the target system to PMS Link for maintenance deferrals.",
+        reply: "Postponement requests belong to PMS Link. Switch the active system to PMS Link for this request.",
         result: null
+      };
+    }
+
+    if (!client.settings.pmsPostponementPath) {
+      return {
+        intent: "Postponement draft",
+        normalizedEnglish: routed.normalizedEnglish || query,
+        reply: "The live postponement endpoint is not configured yet, so I prepared a draft request instead.",
+        result: {
+          draft: true,
+          payload: routed.params || {}
+        }
       };
     }
 
@@ -246,53 +273,66 @@ async function executeCopilotQuery({ client, session, query, systemKey }) {
     return {
       intent: "Postponement",
       normalizedEnglish: routed.normalizedEnglish || query,
-      reply: result.ok
-        ? "Submitted the postponement request to the configured PMS Link endpoint."
-        : "I could not submit that postponement request.",
+      reply: summarizeResult(result),
       result
     };
   }
 
   if (action === "requisition") {
+    if (!(systemKey === "purchase" ? client.settings.purchaseRequisitionPath : client.settings.pmsRequisitionPath)) {
+      return {
+        intent: "Requisition draft",
+        normalizedEnglish: routed.normalizedEnglish || query,
+        reply: "The live requisition write endpoint is not configured yet, so I prepared a draft payload instead.",
+        result: {
+          draft: true,
+          payload: routed.params || {}
+        }
+      };
+    }
+
     const result = await client.createRequisition(systemKey, session, routed.params || {});
     return {
       intent: "Requisition",
       normalizedEnglish: routed.normalizedEnglish || query,
-      reply: result.ok
-        ? `Submitted the requisition request to the configured ${targetSystem} endpoint.`
-        : `I could not submit that requisition request to ${targetSystem}.`,
+      reply: summarizeResult(result),
       result
     };
   }
 
   if (action === "procurement_followup") {
+    if (systemKey !== "purchase") {
+      return {
+        intent: "Procurement follow-up",
+        normalizedEnglish: routed.normalizedEnglish || query,
+        reply: "Procurement follow-up belongs to Purchase Link. Switch the active system to Purchase Link for this request.",
+        result: null
+      };
+    }
+
     const result = await client.procurementFollowUp(systemKey, session, {});
     return {
       intent: "Procurement follow-up",
       normalizedEnglish: routed.normalizedEnglish || query,
-      reply: result.ok
-        ? `Fetched procurement follow-up data from the configured ${targetSystem} endpoint.`
-        : `I could not fetch procurement follow-up from ${targetSystem}.`,
+      reply: summarizeResult(result),
       result
     };
   }
 
   if (systemKey === "purchase") {
     return {
-      intent: "Due jobs",
+      intent: "Maintenance forecast",
       normalizedEnglish: routed.normalizedEnglish || query,
-      reply: "Due-job and maintenance forecast queries belong to PMS Link. Switch the target system to PMS Link for maintenance forecasting.",
+      reply: "Maintenance forecasting belongs to PMS Link. Switch the active system to PMS Link for this request.",
       result: null
     };
   }
 
   const result = await client.listDueJobs(systemKey, session, {});
   return {
-    intent: "Due jobs",
+    intent: "Maintenance forecast",
     normalizedEnglish: routed.normalizedEnglish || query,
-    reply: result.ok
-      ? "Fetched due-job data from the configured PMS Link endpoint."
-      : "I could not fetch due-job data from the configured endpoint.",
+    reply: summarizeResult(result),
     result
   };
 }

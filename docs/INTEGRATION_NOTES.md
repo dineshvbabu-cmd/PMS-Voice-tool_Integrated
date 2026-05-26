@@ -1,5 +1,14 @@
 # Integration Notes
 
+## Current product shape
+
+This repository now runs as:
+
+- `apps/api`: Mazik integration backend
+- `apps/web`: Railway-deployable React frontend
+
+The backend already preloads the confirmed read endpoints captured from your live session, while still leaving unconfirmed write endpoints configurable.
+
 ## Confirmed from live PMS Link bundle
 
 Live shell:
@@ -88,3 +97,11 @@ But those paths did not resolve anonymously on the live API host, so they should
    - request body
    - auth headers or cookie behavior
 6. Enter those paths into this starter or give them to me and I can wire them in permanently
+
+## Next live captures to prioritize
+
+- maintenance completion submit
+- maintenance postponement request submit
+- defect create
+- requisition create
+- procurement workflow submit or approve
