@@ -523,11 +523,43 @@ pre {
   gap: 16px;
 }
 
-.payload-box {
-  border-radius: 22px;
+.payload-section {
+  display: grid;
+  gap: 12px;
+}
+
+.payload-section-header {
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.technical-details {
+  border-radius: 20px;
   border: 1px solid var(--line);
+  background: rgba(10, 22, 38, 0.88);
+  overflow: hidden;
+}
+
+.technical-details summary {
+  cursor: pointer;
+  padding: 14px 18px;
+  font-weight: 700;
+  color: var(--muted);
+  list-style: none;
+}
+
+.technical-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.payload-box {
+  border-top: 1px solid var(--line);
   background: rgba(7, 17, 29, 0.94);
-  padding: 16px;
+  margin: 0;
+  padding: 16px 18px 20px;
   max-height: 540px;
   overflow: auto;
   font-size: 0.9rem;

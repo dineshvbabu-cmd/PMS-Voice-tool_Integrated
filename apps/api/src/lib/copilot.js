@@ -63,7 +63,7 @@ function cleanKeyword(value) {
     .replace(/\bvessel\s+/i, "")
     .replace(/\bwhich\s+is\b.*$/i, "")
     .replace(/\bthat\s+is\b.*$/i, "")
-    .replace(/\b(in the next|next|coming due|overdue|due|status|with|for|on|and|show|list|find|track|please|all|open|closed|critical|non critical|non-critical|detail|details)\b.*$/i, "")
+    .replace(/\b(in the next|next|coming due|overdue|due|status|with|for|from|on|and|show|list|find|track|please|all|open|closed|critical|non critical|non-critical|detail|details|close|complete|completed|completion|postpone|defer|create|raise|submit)\b.*$/i, "")
     .replace(/^[^a-z0-9]+|[^a-z0-9]+$/gi, "")
     .trim();
 }
@@ -71,6 +71,10 @@ function cleanKeyword(value) {
 function findKeyword(text) {
   const candidates = [
     firstMatch(text, /["']([^"']{2,80})["']/),
+    firstMatch(
+      text,
+      /(?:close|complete|completed|postpone|defer|show|read|open|find|list)\s+(?:the\s+)?(?:job|jobs|maintenance|work order|workorder|detail|details)?\s*(?:for|of)?\s*([a-z0-9][a-z0-9 .&()/-]{2,80}?)(?:\s+(?:on|for)\s+vessel\b|\s+which\s+is\b|\s+that\s+is\b|[?.!,]|$|\s+(?:due|overdue|coming|status|completed|with|until|because)\b)/i
+    ),
     firstMatch(text, /(?:on|for|in)\s+vessel\s+([a-z0-9][a-z0-9 .&()/-]{1,80})/i),
     firstMatch(text, /vessel\s+([a-z0-9][a-z0-9 .&()/-]{1,80})/i),
     firstMatch(text, /(?:on|for)\s+([a-z0-9][a-z0-9 .&()/-]{1,80}?)(?:[?.!,]|$|\s+(?:in|with|due|overdue|coming|status|where)\b)/i),
@@ -1044,7 +1048,7 @@ function buildTablePresentation({
   };
 }
 
-function buildPayloadPresentation(title, message, payload, missingFields, actionName, context = {}) {
+function buildPayloadPresentation(title, message, payload, missingFields, actionName, context = {}, options = {}) {
   return {
     type: "payload",
     title,
@@ -1052,8 +1056,126 @@ function buildPayloadPresentation(title, message, payload, missingFields, action
     payload,
     missingFields: missingFields || [],
     actionName,
-    context
+    context,
+    detailFields: options.detailFields || [],
+    reviewFields: options.reviewFields || [],
+    technicalLabel: options.technicalLabel || "Technical payload"
   };
+}
+
+function formatFieldLabel(value) {
+  return String(value || "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function buildField(label, value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const text = String(value).trim();
+  if (!text) {
+    return null;
+  }
+
+  return { label, value: text };
+}
+
+function compactFields(fields) {
+  return (fields || []).filter(Boolean);
+}
+
+function humanizeMissingField(field) {
+  const lookup = {
+    shipComponentJobLinkId: "job selection",
+    shipMaintenanceId: "maintenance record",
+    jobForecastId: "forecast reference",
+    completionDate: "completion date",
+    completionRemarks: "completion remarks",
+    CurrentCounterValue: "counter reading",
+    overDueRemarks: "overdue remarks",
+    maintenanceCause: "maintenance cause",
+    currentDuedate: "current due date",
+    postponeTill: "postponement mode",
+    postponeDate: "new due date",
+    postponeFrequency: "postponement frequency",
+    postponeReason: "postponement reason",
+    postponeRemarks: "postponement remarks",
+    approvedBy: "approver",
+    requisitionPayload: "requisition details"
+  };
+
+  return lookup[field] || formatFieldLabel(field).toLowerCase();
+}
+
+function humanizeMissingFields(fields = []) {
+  return fields.map(humanizeMissingField);
+}
+
+function buildMaintenanceContextFields(context) {
+  const detail = context?.detail || {};
+  const row = context?.row || {};
+
+  return compactFields([
+    buildField("Job name", detail.jobName || row.jobName),
+    buildField("Vessel", row.vesselName),
+    buildField("Component", detail.shipComponentName || row.shipComponentName),
+    buildField("Job code", detail.jobCode || row.jobCode),
+    buildField("Ship component job link id", context?.jobId),
+    buildField("Due date", formatDate(row.dueDate || row.estScheduleDate || detail.nextScheduleDate)),
+    buildField("Status", isOverdueMaintenance(row) ? "Overdue" : row.jobStatus || "Due"),
+    buildField("Responsibility", detail.positionName || row.userPosition),
+    buildField("Priority", detail.priorityName || row.prioirty),
+    buildField("Critical", row.jobCritical || row.compCritical ? "Yes" : "No"),
+    buildField("Last done", formatDate(detail.lastDoneDate)),
+    buildField(
+      "Window",
+      [detail.windowStart, detail.windowEnd].filter(Boolean).join(" / ")
+    ),
+    buildField("Procedure reference", detail.procedureReference),
+    buildField("Safety procedure", detail.safetyProcedure),
+    buildField("Operational procedure", detail.operationalProcedure)
+  ]);
+}
+
+function buildCloseJobReviewFields(context, payload) {
+  const row = context?.row || {};
+  return compactFields([
+    buildField("Completion date", formatDate(payload?.completionDate)),
+    buildField("Counter reading", payload?.CurrentCounterValue),
+    buildField("Completion remarks", payload?.completionRemarks),
+    buildField("Overdue remarks", payload?.overDueRemarks || (isOverdueMaintenance(row) ? "Still required" : "")),
+    buildField("Work order status", payload?.workOrderStatus)
+  ]);
+}
+
+function buildPostponementReviewFields(payload) {
+  return compactFields([
+    buildField("Current due date", formatDate(payload?.currentDuedate)),
+    buildField("Postponement mode", payload?.postponeTill),
+    buildField("New due date", formatDate(payload?.postponeDate)),
+    buildField("Postponement frequency", payload?.postponeFrequency),
+    buildField("Postponement reason", payload?.postponeReason),
+    buildField("Approver", payload?.approvedBy),
+    buildField("Remarks", payload?.postponeRemarks)
+  ]);
+}
+
+function buildRequisitionReviewFields(payload, context = {}) {
+  const requisition = payload?.Requisition || {};
+  return compactFields([
+    buildField("Vessel", context.vessel || requisition.vesselName || requisition.vesselId),
+    buildField("Description", context.description || requisition.description),
+    buildField("Linked job", context.linkedJobId || requisition.linkedJobId),
+    buildField("Priority", context.priority || requisition.priorityName || requisition.priorityId),
+    buildField("Service type", context.serviceType || requisition.serviceTypeName || requisition.orderTypeId),
+    buildField("Workflow", context.workflow || payload?.workflow),
+    buildField("Cart items", context.cartItems || context.itemPreview),
+    buildField("Item count", context.itemCount),
+    buildField("Template item count", context.templateItemCount)
+  ]);
 }
 
 function buildMaintenancePresentation(result, params = {}) {
@@ -1105,10 +1227,14 @@ function buildMaintenanceDetailPresentation(detail) {
     title: "Maintenance detail",
     subtitle: detail?.jobName || "Live PMS job detail",
     fields: [
+      { label: "Vessel", value: detail?.vesselName },
       { label: "Job code", value: detail?.jobCode },
       { label: "Component", value: detail?.shipComponentName },
+      { label: "Due date", value: formatDate(detail?.nextScheduleDate || detail?.dueDate || detail?.estScheduleDate) },
+      { label: "Status", value: detail?.jobStatus },
       { label: "Responsibility", value: detail?.positionName },
       { label: "Priority", value: detail?.priorityName },
+      { label: "Critical", value: detail?.jobCritical || detail?.compCritical ? "Yes" : "" },
       { label: "Last done", value: formatDate(detail?.lastDoneDate) },
       { label: "Window", value: `${detail?.windowStart || ""} / ${detail?.windowEnd || ""}`.trim() },
       { label: "Procedure ref", value: detail?.procedureReference },
@@ -1307,10 +1433,7 @@ function buildRequisitionDetailPresentation(detail, workflow, delivery) {
 
 function buildWriteContext(context) {
   return {
-    jobName: context?.detail?.jobName || context?.row?.jobName || "",
-    vesselName: context?.row?.vesselName || "",
-    shipComponentJobLinkId: context?.jobId || "",
-    requisitionNumber: context?.detail?.documentHeader || ""
+    shipComponentJobLinkId: context?.jobId || ""
   };
 }
 
@@ -1741,6 +1864,34 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
       };
     }
 
+    if (!routed.params?.jobId) {
+      const search = await findCandidateMaintenanceJobs(client, effectiveSession, routed.params || {});
+      if (!search.result.ok) {
+        return {
+          intent: "Maintenance detail",
+          normalizedEnglish,
+          reply: summarizeResult(search.result),
+          result: search.result,
+          presentation: null
+        };
+      }
+
+      if (search.rows.length !== 1) {
+        return {
+          intent: "Select maintenance job",
+          normalizedEnglish,
+          reply:
+            search.rows.length > 1
+              ? "I found multiple live jobs matching that component or job name. Select the right job below to open the full maintenance detail."
+              : "I could not find a live maintenance job matching that component or job name. Try a different job keyword, component name, or vessel.",
+          result: search.result,
+          presentation: buildMaintenancePresentation(search.result, routed.params || {})
+        };
+      }
+
+      routed.params.jobId = String(search.rows[0].shipComponentJobLinkId || "");
+    }
+
     const result = await client.getJobDetail(effectiveSystemKey, effectiveSession, routed.params?.jobId || "");
     const detail = unwrapResultData(result);
     return {
@@ -1980,16 +2131,21 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
       return buildDraftResult(
         "Close maintenance draft",
         normalizedEnglish,
-        `I resolved the live maintenance record, but I still need ${missingFields.join(", ")} before I can submit the Mazik close-job action.`,
+        `I resolved the live maintenance record, but I still need ${humanizeMissingFields(missingFields).join(", ")} before I can submit the Mazik close-job action.`,
         payload,
         missingFields,
         buildPayloadPresentation(
           "Close maintenance draft",
-          "Review the parsed completion payload and add the missing fields.",
+          `Review the live job detail below and provide the remaining ${humanizeMissingFields(missingFields).join(", ")} before submission.`,
           payload,
           missingFields,
           "close_job",
-          buildWriteContext(context)
+          buildWriteContext(context),
+          {
+            detailFields: buildMaintenanceContextFields(context),
+            reviewFields: buildCloseJobReviewFields(context, payload),
+            technicalLabel: "Technical completion payload"
+          }
         )
       );
     }
@@ -2006,11 +2162,16 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
       },
       buildPayloadPresentation(
         "Maintenance completion ready",
-        "Review and confirm this completion payload before it is submitted to Mazik.",
+        "Review the live job detail and completion values before you confirm submission to Mazik.",
         payload,
         [],
         "close_job",
-        buildWriteContext(context)
+        buildWriteContext(context),
+        {
+          detailFields: buildMaintenanceContextFields(context),
+          reviewFields: buildCloseJobReviewFields(context, payload),
+          technicalLabel: "Technical completion payload"
+        }
       )
     );
   }
@@ -2072,16 +2233,21 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
       return buildDraftResult(
         "Postponement draft",
         normalizedEnglish,
-        `I resolved the live maintenance record, but I still need ${missingFields.join(", ")} before I can submit the Mazik postponement.`,
+        `I resolved the live maintenance record, but I still need ${humanizeMissingFields(missingFields).join(", ")} before I can submit the Mazik postponement.`,
         payload,
         missingFields,
         buildPayloadPresentation(
           "Postponement draft",
-          "Review the parsed postponement payload and add the missing fields.",
+          `Review the live job detail below and provide the remaining ${humanizeMissingFields(missingFields).join(", ")} before submission.`,
           payload,
           missingFields,
           "postponement",
-          buildWriteContext(context)
+          buildWriteContext(context),
+          {
+            detailFields: buildMaintenanceContextFields(context),
+            reviewFields: buildPostponementReviewFields(payload),
+            technicalLabel: "Technical postponement payload"
+          }
         )
       );
     }
@@ -2098,11 +2264,16 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
       },
       buildPayloadPresentation(
         "Maintenance postponement ready",
-        "Review and confirm this postponement payload before it is submitted to Mazik.",
+        "Review the live job detail and postponement values before you confirm submission to Mazik.",
         payload,
         [],
         "postponement",
-        buildWriteContext(context)
+        buildWriteContext(context),
+        {
+          detailFields: buildMaintenanceContextFields(context),
+          reviewFields: buildPostponementReviewFields(payload),
+          technicalLabel: "Technical postponement payload"
+        }
       )
     );
   }
@@ -2129,11 +2300,15 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
         missingFields,
         buildPayloadPresentation(
           "Requisition draft",
-          "Review the requisition draft and supply the remaining fields before submission.",
+          `Review the requisition context below and provide the remaining ${humanizeMissingFields(missingFields).join(", ")} before submission.`,
           payload,
           missingFields,
           "requisition_create",
-          draftContext
+          draftContext,
+          {
+            reviewFields: buildRequisitionReviewFields(payload, draftContext),
+            technicalLabel: "Technical requisition payload"
+          }
         )
       );
     }
@@ -2149,11 +2324,15 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
       },
       buildPayloadPresentation(
         "Requisition ready",
-        "Review and confirm this requisition draft before it is submitted to Mazik.",
+        "Review the requisition context and values before you confirm submission to Mazik.",
         payload,
         [],
         "requisition_create",
-        draftContext
+        draftContext,
+        {
+          reviewFields: buildRequisitionReviewFields(payload, draftContext),
+          technicalLabel: "Technical requisition payload"
+        }
       )
     );
   }

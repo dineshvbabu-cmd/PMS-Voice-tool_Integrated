@@ -80,6 +80,9 @@ type PayloadPresentation = {
   missingFields?: string[];
   actionName?: string;
   context?: Record<string, string>;
+  detailFields?: Array<{ label: string; value: string }>;
+  reviewFields?: Array<{ label: string; value: string }>;
+  technicalLabel?: string;
 };
 
 type Presentation = TablePresentation | DetailPresentation | PayloadPresentation | null;
@@ -911,26 +914,62 @@ function App() {
             <div className="payload-banner">
               <strong>{presentation.message || "Review the parsed payload."}</strong>
               {presentation.missingFields?.length ? (
-                <span>Missing: {presentation.missingFields.join(", ")}</span>
+                <span>Missing: {presentation.missingFields.map(formatContextLabel).join(", ")}</span>
               ) : (
                 <span>Ready for confirmation</span>
               )}
             </div>
 
-            {presentation.context ? (
-              <div className="detail-grid">
-                {Object.entries(presentation.context).map(([key, value]) => (
-                  value ? (
-                    <div key={key} className="detail-card">
-                      <span>{formatContextLabel(key)}</span>
-                      <strong>{value}</strong>
+            {presentation.detailFields?.length ? (
+              <div className="payload-section">
+                <div className="payload-section-header">Live job detail</div>
+                <div className="detail-grid">
+                  {presentation.detailFields.map((field) => (
+                    <div key={`${field.label}-${field.value}`} className="detail-card">
+                      <span>{field.label}</span>
+                      <strong>{field.value}</strong>
                     </div>
-                  ) : null
-                ))}
+                  ))}
+                </div>
               </div>
             ) : null}
 
-            <pre className="payload-box">{formatJson(presentation.payload)}</pre>
+            {presentation.reviewFields?.length ? (
+              <div className="payload-section">
+                <div className="payload-section-header">
+                  {pendingAction ? "Action ready for confirmation" : "Action details still needed"}
+                </div>
+                <div className="detail-grid">
+                  {presentation.reviewFields.map((field) => (
+                    <div key={`${field.label}-${field.value}`} className="detail-card">
+                      <span>{field.label}</span>
+                      <strong>{field.value}</strong>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {presentation.context ? (
+              <div className="payload-section">
+                <div className="payload-section-header">Additional context</div>
+                <div className="detail-grid">
+                  {Object.entries(presentation.context).map(([key, value]) => (
+                    value ? (
+                      <div key={key} className="detail-card">
+                        <span>{formatContextLabel(key)}</span>
+                        <strong>{value}</strong>
+                      </div>
+                    ) : null
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <details className="technical-details">
+              <summary>{presentation.technicalLabel || "Technical payload"}</summary>
+              <pre className="payload-box">{formatJson(presentation.payload)}</pre>
+            </details>
           </div>
         ) : null}
       </section>
