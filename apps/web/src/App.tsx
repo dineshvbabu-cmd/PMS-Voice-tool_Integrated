@@ -112,7 +112,11 @@ function setStoredSessionId(sessionId: string) {
 
 async function apiFetch<T>(path: string, options: RequestInit = {}) {
   const headers = new Headers(options.headers || {});
-  headers.set("Content-Type", "application/json");
+  const hasBody = options.body !== undefined && options.body !== null;
+
+  if (hasBody) {
+    headers.set("Content-Type", "application/json");
+  }
 
   const sessionId = getStoredSessionId();
   if (sessionId) {

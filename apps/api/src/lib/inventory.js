@@ -114,6 +114,13 @@ const liveEndpoints = {
         notes: "Triggered by clicking a maintenance row."
       },
       {
+        key: "postponeJobs",
+        label: "Postponement queue",
+        method: "GET",
+        path: "ShipMaster/postponeJobs",
+        notes: "Captured from the Postpone Jobs tab on May 26, 2026."
+      },
+      {
         key: "vessels",
         label: "Vessel lookup",
         method: "GET",
@@ -126,7 +133,8 @@ const liveEndpoints = {
       "UserManagement/Users/0",
       "PMSGroup/causes/0",
       "CategoryMaster/filterPriority/0",
-      "UserManagement/UserFleets/0/{userId}"
+      "UserManagement/UserFleets/0/{userId}",
+      "CategoryMaster/attachmentTypes/0"
     ]
   },
   purchase: {
@@ -173,6 +181,7 @@ const liveEndpoints = {
 const samplePrompts = [
   "Show maintenance forecast for Woodstock due in the next 30 days.",
   "Read the maintenance detail for ship component job link 87196.",
+  "Show postponed jobs awaiting approval for Alkebulan.",
   "List requisitions in PO SEND status for Alkebulan.",
   "Show the workflow log for requisition 17209.",
   "Prepare a closure draft for WO-24088 completed on 2026-05-26."
