@@ -199,6 +199,85 @@ pre {
   margin-top: 18px;
 }
 
+.assistant-dock {
+  display: grid;
+  grid-template-columns: 108px minmax(0, 1fr);
+  gap: 18px;
+  align-items: center;
+  margin-top: 20px;
+}
+
+.assistant-dock-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.assistant-dock-copy strong {
+  display: block;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 1.02rem;
+}
+
+.assistant-dock-copy span {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.assistant-orb {
+  position: relative;
+  width: 92px;
+  height: 92px;
+  border-radius: 999px;
+  border: 1px solid rgba(103, 216, 255, 0.32);
+  background:
+    radial-gradient(circle at 30% 30%, rgba(145, 241, 255, 0.9), rgba(71, 218, 255, 0.28) 35%, rgba(8, 20, 36, 0.95) 68%),
+    linear-gradient(135deg, rgba(103, 216, 255, 0.18), rgba(24, 187, 255, 0.08));
+  box-shadow:
+    0 0 0 10px rgba(103, 216, 255, 0.05),
+    0 18px 36px rgba(5, 14, 24, 0.5),
+    inset 0 0 42px rgba(103, 216, 255, 0.18);
+  display: grid;
+  place-items: center;
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.assistant-orb:hover:not(:disabled) {
+  transform: translateY(-1px) scale(1.01);
+  box-shadow:
+    0 0 0 12px rgba(103, 216, 255, 0.08),
+    0 22px 40px rgba(5, 14, 24, 0.56),
+    inset 0 0 52px rgba(103, 216, 255, 0.22);
+}
+
+.assistant-orb:disabled {
+  opacity: 0.58;
+  cursor: not-allowed;
+}
+
+.assistant-orb.armed {
+  border-color: rgba(121, 239, 190, 0.34);
+  box-shadow:
+    0 0 0 10px rgba(121, 239, 190, 0.07),
+    0 18px 36px rgba(5, 14, 24, 0.5),
+    inset 0 0 42px rgba(121, 239, 190, 0.16);
+}
+
+.assistant-orb.listening {
+  border-color: rgba(103, 216, 255, 0.7);
+  animation: orb-pulse 1.6s ease-in-out infinite;
+}
+
+.assistant-orb-core {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 999px;
+  color: #f4fcff;
+  background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.24), rgba(103, 216, 255, 0.12));
+  backdrop-filter: blur(8px);
+}
+
 .ghost-button,
 .secondary-button,
 .primary-button,
@@ -466,6 +545,25 @@ pre {
   animation: spin 1s linear infinite;
 }
 
+@keyframes orb-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow:
+      0 0 0 10px rgba(103, 216, 255, 0.08),
+      0 18px 36px rgba(5, 14, 24, 0.5),
+      inset 0 0 42px rgba(103, 216, 255, 0.18);
+  }
+
+  50% {
+    transform: scale(1.04);
+    box-shadow:
+      0 0 0 16px rgba(103, 216, 255, 0.12),
+      0 22px 40px rgba(5, 14, 24, 0.56),
+      inset 0 0 52px rgba(103, 216, 255, 0.28);
+  }
+}
+
 @keyframes spin {
   from {
     transform: rotate(0deg);
@@ -502,6 +600,11 @@ pre {
   .selected-grid,
   .detail-grid {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .assistant-dock {
+    grid-template-columns: 1fr;
+    justify-items: start;
   }
 }
 

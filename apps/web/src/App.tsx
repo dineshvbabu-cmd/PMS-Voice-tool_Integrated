@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, ExternalLink, KeyRound, ListFilter, LoaderCircle, Mic, Send, ShieldCheck, Sparkles } from "lucide-react";
+import { CheckCircle2, ExternalLink, KeyRound, ListFilter, LoaderCircle, Mic, ShieldCheck, Sparkles } from "lucide-react";
 
 type SystemKey = "pms" | "purchase";
 
@@ -279,6 +279,7 @@ function App() {
   }, [presentation]);
 
   const pendingAction = commandOutput?.result?.pendingConfirmation ? commandOutput.result.pendingAction : null;
+  const hasTypedPrompt = queryInput.trim().length > 0;
 
   const runPrompt = (prompt: string) => {
     setQueryInput(prompt);
@@ -342,6 +343,28 @@ function App() {
 
     setIsListening(true);
     recognitionRef.current.start();
+  };
+
+  const activateAssistant = () => {
+    if (queryMutation.isPending) {
+      return;
+    }
+
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+      return;
+    }
+
+    if (hasTypedPrompt) {
+      queryMutation.mutate(queryInput.trim());
+      return;
+    }
+
+    if (voiceSupported) {
+      setIsListening(true);
+      recognitionRef.current?.start();
+    }
   };
 
   return (
@@ -449,27 +472,41 @@ function App() {
             rows={6}
             value={queryInput}
             onChange={(event) => setQueryInput(event.target.value)}
-            placeholder="Show all overdue maintenances."
+            placeholder="Type a request, or tap the assistant to speak."
           />
         </label>
 
-        <div className="button-strip">
+        <div className="assistant-dock">
           <button
-            className="primary-button"
-            onClick={() => queryMutation.mutate(queryInput)}
-            disabled={!queryInput || queryMutation.isPending}
+            className={`assistant-orb ${isListening ? "listening" : ""} ${hasTypedPrompt ? "armed" : ""}`}
+            onClick={activateAssistant}
+            disabled={(!voiceSupported && !hasTypedPrompt) || queryMutation.isPending}
+            aria-label={isListening ? "Stop listening" : hasTypedPrompt ? "Send typed request" : "Start voice assistant"}
           >
-            <Send size={16} />
-            {queryMutation.isPending ? "Running" : "Run"}
+            <span className="assistant-orb-core">
+              {isListening ? <Mic size={22} /> : <Sparkles size={22} />}
+            </span>
           </button>
-          <button
-            className={`secondary-button ${isListening ? "voice-active" : ""}`}
-            onClick={toggleVoice}
-            disabled={!voiceSupported}
-          >
-            <Mic size={16} />
-            {isListening ? "Stop voice" : voiceSupported ? "Voice command" : "Voice unavailable"}
-          </button>
+          <div className="assistant-dock-copy">
+            <strong>
+              {queryMutation.isPending
+                ? "Working on your request"
+                : isListening
+                  ? "Listening now"
+                  : hasTypedPrompt
+                    ? "Tap the assistant to send"
+                    : voiceSupported
+                      ? "Tap the assistant to speak"
+                      : "Type a request to send"}
+            </strong>
+            <span>
+              {isListening
+                ? "Speak naturally. The assistant will transcribe and run the request."
+                : hasTypedPrompt
+                  ? "Your typed prompt is ready. One tap sends it like a copilot command."
+                  : "Use voice for hands-free operation, or type first and tap once to run."}
+            </span>
+          </div>
           {pendingAction ? (
             <button
               className="confirm-button"
