@@ -54,6 +54,90 @@ function readBody(req) {
   });
 }
 
+function readBinaryBody(req, maxBytes = 26 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let totalBytes = 0;
+
+    req.on("data", (chunk) => {
+      totalBytes += chunk.length;
+      if (totalBytes > maxBytes) {
+        reject(new Error("Audio payload too large"));
+        req.destroy();
+        return;
+      }
+
+      chunks.push(Buffer.from(chunk));
+    });
+
+    req.on("end", () => resolve(Buffer.concat(chunks, totalBytes)));
+    req.on("error", reject);
+  });
+}
+
+function audioExtension(mimeType) {
+  const normalized = String(mimeType || "").toLowerCase();
+
+  if (normalized.includes("webm")) {
+    return "webm";
+  }
+  if (normalized.includes("wav")) {
+    return "wav";
+  }
+  if (normalized.includes("mp4")) {
+    return "mp4";
+  }
+  if (normalized.includes("mpeg") || normalized.includes("mp3")) {
+    return "mp3";
+  }
+  if (normalized.includes("m4a")) {
+    return "m4a";
+  }
+
+  return "webm";
+}
+
+async function transcribeVoiceToEnglish(audioBuffer, mimeType) {
+  const fileBlob = new Blob([audioBuffer], { type: mimeType || "audio/webm" });
+  const form = new FormData();
+  form.set("file", fileBlob, `voice-capture.${audioExtension(mimeType)}`);
+  form.set("model", settings.openAiTranscribeModel);
+  form.set(
+    "prompt",
+    [
+      "Maritime maintenance and procurement copilot.",
+      "Expect accented English and mixed-language speech from Indian, Filipino, Russian, European, Australian, American, and Latin crews.",
+      "Expect vessel names, job codes, work orders, overdue maintenance, defects, certificates, requisitions, purchase orders, material receipts, davit, lifeboat, purifier, survey, spare parts, and engine room terminology.",
+      "Return clear operational English."
+    ].join(" ")
+  );
+
+  const response = await fetch("https://api.openai.com/v1/audio/translations", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`
+    },
+    body: form
+  });
+
+  const rawText = await response.text();
+  let parsed;
+  try {
+    parsed = rawText ? JSON.parse(rawText) : {};
+  } catch {
+    parsed = { text: rawText };
+  }
+
+  if (!response.ok) {
+    throw new Error(parsed.error?.message || parsed.message || `OpenAI voice transcription failed with status ${response.status}`);
+  }
+
+  return {
+    transcript: String(parsed.text || "").trim(),
+    model: settings.openAiTranscribeModel
+  };
+}
+
 function allowedOrigin(origin) {
   if (!origin) {
     return "*";
@@ -338,6 +422,34 @@ const server = http.createServer(async (req, res) => {
       });
 
       sendJson(req, res, 200, { ok: result.ok, result });
+      return;
+    }
+
+    if (req.method === "POST" && parsedUrl.pathname === "/api/voice/transcribe") {
+      if (!settings.openAiEnabled) {
+        sendJson(req, res, 501, {
+          ok: false,
+          message: "OpenAI voice transcription is not enabled on this API service."
+        });
+        return;
+      }
+
+      const audioBuffer = await readBinaryBody(req);
+      if (!audioBuffer.length) {
+        sendJson(req, res, 400, { ok: false, message: "No audio was received." });
+        return;
+      }
+
+      const mimeType = String(req.headers["content-type"] || "audio/webm");
+      const transcription = await transcribeVoiceToEnglish(audioBuffer, mimeType);
+
+      sendJson(req, res, 200, {
+        ok: true,
+        transcript: transcription.transcript,
+        provider: "openai",
+        model: transcription.model,
+        mode: "translate-to-english"
+      });
       return;
     }
 

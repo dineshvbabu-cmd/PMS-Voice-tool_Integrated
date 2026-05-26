@@ -28,6 +28,7 @@ function createSettings() {
     purchaseFollowupPath:
       process.env.PURCHASELINK_FOLLOWUP_PATH || "PMRequisitionMaster/purchaseTracksLists",
     openAiLanguageModel: process.env.OPENAI_LANGUAGE_MODEL || "gpt-5.4-mini",
+    openAiTranscribeModel: process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-transcribe",
     openAiEnabled: Boolean(process.env.OPENAI_API_KEY),
     corsAllowedOrigins: String(process.env.CORS_ALLOWED_ORIGINS || "*")
       .split(",")

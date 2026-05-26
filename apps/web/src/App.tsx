@@ -26,7 +26,10 @@ type BootstrapResponse = {
       landingUrl: string;
     }
   >;
-  settings: Record<string, unknown>;
+  settings: {
+    openAiEnabled?: boolean;
+    [key: string]: unknown;
+  };
   session: Record<SystemKey, SessionState | null>;
   samplePrompts: string[];
 };
@@ -101,12 +104,20 @@ type QueryResponse = {
 type BrowserSpeechRecognition = {
   start: () => void;
   stop: () => void;
-  onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+  onresult: ((event: { resultIndex?: number; results: ArrayLike<(ArrayLike<{ transcript: string }> & { isFinal?: boolean })> }) => void) | null;
   onerror: (() => void) | null;
   onend: (() => void) | null;
   continuous: boolean;
   interimResults: boolean;
   lang: string;
+};
+
+type VoiceTranscriptionResponse = {
+  ok: boolean;
+  transcript: string;
+  provider: string;
+  model: string;
+  mode: string;
 };
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") || "http://localhost:3100";
@@ -145,6 +156,29 @@ async function apiFetch<T>(path: string, options: RequestInit = {}) {
   const payload = (await response.json()) as T & { error?: string; message?: string };
   if (!response.ok) {
     throw new Error(payload.error || payload.message || `Request failed with status ${response.status}`);
+  }
+
+  return payload;
+}
+
+async function apiUploadAudio(blob: Blob) {
+  const headers = new Headers();
+  const sessionId = getStoredSessionId();
+  if (sessionId) {
+    headers.set("x-session-id", sessionId);
+  }
+  headers.set("Content-Type", blob.type || "audio/webm");
+  headers.set("x-audio-filename", `voice-${Date.now()}.webm`);
+
+  const response = await fetch(`${API_BASE_URL}/api/voice/transcribe`, {
+    method: "POST",
+    headers,
+    body: blob
+  });
+
+  const payload = (await response.json()) as VoiceTranscriptionResponse & { error?: string; message?: string };
+  if (!response.ok) {
+    throw new Error(payload.error || payload.message || `Voice transcription failed with status ${response.status}`);
   }
 
   return payload;
@@ -192,7 +226,15 @@ function App() {
   const [commandOutput, setCommandOutput] = useState<QueryResponse | null>(null);
   const [voiceSupported, setVoiceSupported] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const voiceStopTimerRef = useRef<number | null>(null);
+  const recognitionFinalTranscriptRef = useRef("");
+  const recognitionInterimTranscriptRef = useRef("");
+  const lastSubmittedPromptRef = useRef("");
 
   const bootstrapQuery = useQuery({
     queryKey: ["bootstrap"],
@@ -280,10 +322,36 @@ function App() {
 
   const pendingAction = commandOutput?.result?.pendingConfirmation ? commandOutput.result.pendingAction : null;
   const hasTypedPrompt = queryInput.trim().length > 0;
+  const serverVoiceEnabled =
+    Boolean(bootstrap?.settings?.openAiEnabled) &&
+    typeof window !== "undefined" &&
+    typeof MediaRecorder !== "undefined" &&
+    Boolean(navigator.mediaDevices?.getUserMedia);
+  const voiceInputEnabled = serverVoiceEnabled || voiceSupported;
+
+  const submitPrompt = (prompt: string) => {
+    const normalizedPrompt = prompt.trim();
+    if (!normalizedPrompt) {
+      return;
+    }
+
+    lastSubmittedPromptRef.current = normalizedPrompt;
+    setQueryInput(normalizedPrompt);
+    queryMutation.mutate(normalizedPrompt);
+  };
 
   const runPrompt = (prompt: string) => {
-    setQueryInput(prompt);
-    queryMutation.mutate(prompt);
+    submitPrompt(prompt);
+  };
+
+  const setVoiceError = (message: string) => {
+    setCommandOutput({
+      intent: "Voice capture",
+      normalizedEnglish: "",
+      reply: message,
+      result: null,
+      presentation: null
+    });
   };
 
   useEffect(() => {
@@ -304,21 +372,46 @@ function App() {
       return;
     }
     const recognition = new SpeechRecognitionCtor();
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.lang = "en-US";
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = navigator.language || "en-US";
     recognition.onresult = (event) => {
-      const transcript = event.results?.[0]?.[0]?.transcript?.trim() || "";
-      if (transcript) {
-        setQueryInput(transcript);
-        queryMutation.mutate(transcript);
+      let finalTranscript = recognitionFinalTranscriptRef.current;
+      let interimTranscript = "";
+
+      for (let index = event.resultIndex || 0; index < event.results.length; index += 1) {
+        const result = event.results[index];
+        const transcript = Array.from(result)
+          .map((entry) => entry.transcript)
+          .join(" ")
+          .trim();
+
+        if (!transcript) {
+          continue;
+        }
+
+        if (result.isFinal) {
+          finalTranscript = `${finalTranscript} ${transcript}`.trim();
+        } else {
+          interimTranscript = `${interimTranscript} ${transcript}`.trim();
+        }
       }
+
+      recognitionFinalTranscriptRef.current = finalTranscript;
+      recognitionInterimTranscriptRef.current = interimTranscript;
+      setQueryInput(`${finalTranscript} ${interimTranscript}`.trim());
     };
     recognition.onerror = () => {
       setIsListening(false);
     };
     recognition.onend = () => {
+      const transcript = `${recognitionFinalTranscriptRef.current} ${recognitionInterimTranscriptRef.current}`.trim();
+      recognitionFinalTranscriptRef.current = "";
+      recognitionInterimTranscriptRef.current = "";
       setIsListening(false);
+      if (transcript) {
+        submitPrompt(transcript);
+      }
     };
 
     recognitionRef.current = recognition;
@@ -330,40 +423,160 @@ function App() {
     };
   }, []);
 
-  const toggleVoice = () => {
+  useEffect(() => {
+    return () => {
+      if (voiceStopTimerRef.current) {
+        window.clearTimeout(voiceStopTimerRef.current);
+      }
+
+      mediaRecorderRef.current?.stop();
+      mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    };
+  }, []);
+
+  const preferredAudioMimeType = () => {
+    const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
+    return candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) || "";
+  };
+
+  const startBrowserRecognition = () => {
     if (!recognitionRef.current) {
       return;
     }
 
-    if (isListening) {
-      recognitionRef.current.stop();
-      setIsListening(false);
-      return;
-    }
-
+    recognitionFinalTranscriptRef.current = "";
+    recognitionInterimTranscriptRef.current = "";
+    setQueryInput("");
     setIsListening(true);
     recognitionRef.current.start();
   };
 
+  const startServerRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1,
+          sampleRate: 16000,
+          sampleSize: 16
+        }
+      });
+
+      const mimeType = preferredAudioMimeType();
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+
+      mediaStreamRef.current = stream;
+      mediaRecorderRef.current = recorder;
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        if (voiceStopTimerRef.current) {
+          window.clearTimeout(voiceStopTimerRef.current);
+          voiceStopTimerRef.current = null;
+        }
+
+        setIsListening(false);
+        const streamToStop = mediaStreamRef.current;
+        mediaStreamRef.current = null;
+        streamToStop?.getTracks().forEach((track) => track.stop());
+
+        const blob = new Blob(audioChunksRef.current, {
+          type: recorder.mimeType || mimeType || "audio/webm"
+        });
+        mediaRecorderRef.current = null;
+        audioChunksRef.current = [];
+
+        if (!blob.size) {
+          return;
+        }
+
+        setIsTranscribing(true);
+        try {
+          const payload = await apiUploadAudio(blob);
+          const transcript = payload.transcript?.trim() || "";
+          if (!transcript) {
+            setVoiceError("I could not hear a clear request. Please try again a bit closer to the microphone.");
+            return;
+          }
+
+          submitPrompt(transcript);
+        } catch (error) {
+          setVoiceError(error instanceof Error ? error.message : "Voice transcription failed.");
+        } finally {
+          setIsTranscribing(false);
+        }
+      };
+
+      recorder.start(1000);
+      setQueryInput("");
+      setIsListening(true);
+      voiceStopTimerRef.current = window.setTimeout(() => {
+        if (mediaRecorderRef.current?.state !== "inactive") {
+          mediaRecorderRef.current?.stop();
+        }
+      }, 180000);
+    } catch (error) {
+      setVoiceError(
+        error instanceof Error ? error.message : "Microphone access failed. Check browser microphone permissions."
+      );
+    }
+  };
+
+  useEffect(() => {
+    const normalizedPrompt = queryInput.trim();
+    if (!normalizedPrompt || normalizedPrompt === lastSubmittedPromptRef.current) {
+      return undefined;
+    }
+
+    if (isListening || isTranscribing || queryMutation.isPending) {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      if (normalizedPrompt && normalizedPrompt !== lastSubmittedPromptRef.current) {
+        submitPrompt(normalizedPrompt);
+      }
+    }, 950);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [queryInput, isListening, isTranscribing, queryMutation.isPending]);
+
   const activateAssistant = () => {
-    if (queryMutation.isPending) {
+    if (queryMutation.isPending || isTranscribing) {
       return;
     }
 
     if (isListening) {
-      recognitionRef.current?.stop();
-      setIsListening(false);
+      if (mediaRecorderRef.current?.state && mediaRecorderRef.current.state !== "inactive") {
+        mediaRecorderRef.current.stop();
+      } else if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
       return;
     }
 
     if (hasTypedPrompt) {
-      queryMutation.mutate(queryInput.trim());
+      submitPrompt(queryInput.trim());
+      return;
+    }
+
+    if (serverVoiceEnabled) {
+      void startServerRecording();
       return;
     }
 
     if (voiceSupported) {
-      setIsListening(true);
-      recognitionRef.current?.start();
+      startBrowserRecognition();
     }
   };
 
@@ -459,7 +672,9 @@ function App() {
             <strong>{commandOutput?.intent || "Ready for a live query"}</strong>
             <p>
               {isListening
-                ? "Listening for your voice command."
+                ? "Listening for your voice command. Tap again when you finish speaking."
+                : isTranscribing
+                  ? "Transcribing your audio into English for the assistant."
                 : commandOutput?.reply ||
                   "Ask for maintenances, defects, certificates, requisitions, PO status, or a write action to prepare."}
             </p>
@@ -480,7 +695,7 @@ function App() {
           <button
             className={`assistant-orb ${isListening ? "listening" : ""} ${hasTypedPrompt ? "armed" : ""}`}
             onClick={activateAssistant}
-            disabled={(!voiceSupported && !hasTypedPrompt) || queryMutation.isPending}
+            disabled={(!voiceInputEnabled && !hasTypedPrompt) || queryMutation.isPending || isTranscribing}
             aria-label={isListening ? "Stop listening" : hasTypedPrompt ? "Send typed request" : "Start voice assistant"}
           >
             <span className="assistant-orb-core">
@@ -489,22 +704,28 @@ function App() {
           </button>
           <div className="assistant-dock-copy">
             <strong>
-              {queryMutation.isPending
+              {isTranscribing
+                ? "Transcribing your voice"
+                : queryMutation.isPending
                 ? "Working on your request"
                 : isListening
                   ? "Listening now"
                   : hasTypedPrompt
                     ? "Tap the assistant to send"
-                    : voiceSupported
+                    : voiceInputEnabled
                       ? "Tap the assistant to speak"
                       : "Type a request to send"}
             </strong>
             <span>
               {isListening
-                ? "Speak naturally. The assistant will transcribe and run the request."
+                ? "Speak naturally in your accent or language. Tap once more to stop when you are done."
+                : isTranscribing
+                  ? "Your recording is being converted into English with a maritime-aware transcription prompt."
                 : hasTypedPrompt
                   ? "Your typed prompt is ready. One tap sends it like a copilot command."
-                  : "Use voice for hands-free operation, or type first and tap once to run."}
+                  : serverVoiceEnabled
+                    ? "Voice capture stays open longer now and uses OpenAI transcription for stronger accent recognition."
+                    : "Use voice for hands-free operation, or type first and tap once to run."}
             </span>
           </div>
           {pendingAction ? (
@@ -540,7 +761,17 @@ function App() {
           </div>
           <div>
             <span>Voice</span>
-            <strong>{voiceSupported ? (isListening ? "Listening" : "Ready") : "Browser support required"}</strong>
+            <strong>
+              {isTranscribing
+                ? "Transcribing"
+                : voiceInputEnabled
+                  ? isListening
+                    ? "Listening"
+                    : serverVoiceEnabled
+                      ? "OpenAI voice ready"
+                      : "Browser voice ready"
+                  : "Type-only mode"}
+            </strong>
           </div>
         </div>
       </section>
