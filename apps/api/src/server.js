@@ -349,6 +349,7 @@ const server = http.createServer(async (req, res) => {
       const result = await executeCopilotQuery({
         client,
         session: browserSession?.systems?.[systemKey] || null,
+        sessions: browserSession?.systems || {},
         query: body.query || "",
         systemKey
       });

@@ -7,6 +7,10 @@ function normalize(text) {
   return String(text || "").toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+function containsAny(text, phrases) {
+  return (phrases || []).some((phrase) => normalize(text).includes(normalize(phrase)));
+}
+
 function firstMatch(text, pattern) {
   const match = String(text || "").match(pattern);
   return match?.[1]?.trim() || "";
@@ -44,6 +48,99 @@ function findDescription(text) {
     firstMatch(text, /(?:description|remarks?|notes?)\s*[:\-]?\s*(.+)$/i) ||
     firstMatch(text, /(?:because|due to)\s+(.+)$/i)
   );
+}
+
+function cleanKeyword(value) {
+  return String(value || "")
+    .replace(/\b(in the next|next|coming due|overdue|due|status|with|for|on|and|show|list|find|track|please)\b.*$/i, "")
+    .replace(/^[^a-z0-9]+|[^a-z0-9]+$/gi, "")
+    .trim();
+}
+
+function findKeyword(text) {
+  const candidates = [
+    firstMatch(text, /["']([^"']{2,80})["']/),
+    firstMatch(text, /(?:on|for|in)\s+vessel\s+([a-z0-9][a-z0-9 .&()/-]{1,80})/i),
+    firstMatch(text, /vessel\s+([a-z0-9][a-z0-9 .&()/-]{1,80})/i),
+    firstMatch(text, /(?:on|for)\s+([a-z0-9][a-z0-9 .&()/-]{1,80}?)(?:[?.!,]|$|\s+(?:in|with|due|overdue|coming|status|where)\b)/i),
+    firstMatch(text, /(?:component|equipment|certificate|survey|defect|job|maintenance|requisition|po|purchase order)\s+(?:for|of)?\s*([a-z0-9][a-z0-9 .&()/-]{2,80})/i)
+  ]
+    .map(cleanKeyword)
+    .filter(Boolean);
+
+  return candidates[0] || "";
+}
+
+function findDueWindowDays(text) {
+  const normalized = normalize(text);
+
+  if (normalized.includes("today")) {
+    return "0";
+  }
+
+  if (normalized.includes("tomorrow")) {
+    return "1";
+  }
+
+  if (containsAny(normalized, ["this week", "next week"])) {
+    return "7";
+  }
+
+  if (containsAny(normalized, ["this month", "next month", "coming month"])) {
+    return "30";
+  }
+
+  if (containsAny(normalized, ["next 15 days", "due in 15 days"])) {
+    return "15";
+  }
+
+  if (containsAny(normalized, ["next 30 days", "due in 30 days"])) {
+    return "30";
+  }
+
+  if (containsAny(normalized, ["next 60 days", "due in 60 days"])) {
+    return "60";
+  }
+
+  if (normalized.includes("soon")) {
+    return "30";
+  }
+
+  return (
+    findNumberLike(text, /next\s+(\d+)\s+days/i) ||
+    findNumberLike(text, /due in\s+(\d+)\s+days/i) ||
+    findNumberLike(text, /within\s+(\d+)\s+days/i)
+  );
+}
+
+function findStatusText(text) {
+  const explicit =
+    firstMatch(text, /(?:in|at)\s+([a-z0-9 /_-]+?)\s+status(?:\s+(?:for|on|in|with|where)\b|[?.!,]|$)/i) ||
+    firstMatch(text, /status(?!\s+(?:for|on|in|with|where|and)\b)\s*[:\-]?\s*([a-z0-9 /_-]+?)(?:\s+(?:for|on|in|with|where)\b|[?.!,]|$)/i);
+
+  if (explicit) {
+    return explicit;
+  }
+
+  const statuses = [
+    "po send",
+    "awaiting approval",
+    "approved",
+    "draft",
+    "inquiry",
+    "rfq",
+    "quoted",
+    "ordered",
+    "partial receipt",
+    "received",
+    "invoice pending",
+    "invoiced",
+    "closed",
+    "open"
+  ];
+
+  const normalized = normalize(text);
+  return statuses.find((status) => normalized.includes(status)) || "";
 }
 
 function parseEmbeddedJson(text) {
@@ -123,6 +220,7 @@ async function routeWithOpenAI(query, systemKey) {
             "Return strict JSON with keys action, normalizedEnglish, params, explanation.",
             "Supported actions are maintenance_list, maintenance_detail, defects_list, certificates_list, requisitions_list, purchase_orders_list, requisition_detail, close_job, postponement, requisition_create, help.",
             "For list requests, extract filters such as overdue, due, critical, nonCritical, significant, open, closed, completed, statusText, dueWindowDays, and keyword.",
+            "Map natural operator wording like jobs, work orders, PM jobs, requisitions, PRs, RFQs, POs, material receipts, invoices, certificates, surveys, expiring, coming due, and blocked by spares.",
             "For close_job params, use jobId, completionDate, closureDescription, maintenanceCauseId, overdueRemarks, currentCounterValue.",
             "For postponement params, use jobId, postponeMode, postponeDate, postponeFrequency, postponeReasonId, remarks, approvedBy, currentDueDate.",
             "For requisition_create params, prefer requisitionPayload when the user provides structured JSON.",
@@ -151,7 +249,69 @@ function routeLocally(query) {
   const requisitionId = findRequisitionId(query);
   const date = findDate(query);
   const description = findDescription(query);
+  const keyword = findKeyword(query) || description || "";
+  const dueWindowDays = findDueWindowDays(query);
+  const statusText = findStatusText(query);
   const requisitionPayload = parseEmbeddedJson(query);
+  const maintenanceSignals = containsAny(text, [
+    "maintenance",
+    "maintenances",
+    "job",
+    "jobs",
+    "work order",
+    "work orders",
+    "workorder",
+    "planned maintenance",
+    "inspection",
+    "service due",
+    "pms",
+    "component job"
+  ]);
+  const defectSignals = containsAny(text, ["defect", "defects", "deficiency", "deficiencies"]);
+  const certificateSignals = containsAny(text, [
+    "certificate",
+    "certificates",
+    "survey",
+    "surveys",
+    "expiring certificate",
+    "expiry",
+    "expire"
+  ]);
+  const requisitionSignals = containsAny(text, [
+    "requisition",
+    "requisitions",
+    "purchase request",
+    "purchase requests",
+    "pr ",
+    "rfq",
+    "inquiry"
+  ]);
+  const purchaseSignals =
+    !requisitionSignals &&
+    containsAny(text, [
+      "purchase order",
+      "purchase orders",
+      "po ",
+      "po status",
+      "material receipt",
+      "material receipts",
+      "goods receipt",
+      "invoice",
+      "invoices",
+      "vendor follow up",
+      "procurement"
+    ]);
+  const detailSignals = containsAny(text, [
+    "detail",
+    "details",
+    "instruction",
+    "instructions",
+    "read job",
+    "read maintenance",
+    "show procedure",
+    "show instructions",
+    "open job"
+  ]);
 
   if (!text || text === "help") {
     return {
@@ -227,17 +387,17 @@ function routeLocally(query) {
     };
   }
 
-  if (text.includes("certificate") || text.includes("survey")) {
+  if (certificateSignals) {
     let type = "Default";
     if (text.includes("overdue")) {
       type = "Overdue";
-    } else if (text.includes("due in 15")) {
+    } else if (dueWindowDays === "15") {
       type = "Due in 15 Days";
-    } else if (text.includes("due in 30")) {
+    } else if (dueWindowDays === "30") {
       type = "Due in 30 Days";
-    } else if (text.includes("due in 60")) {
+    } else if (dueWindowDays === "60") {
       type = "Due in 60 Days";
-    } else if (text.includes("coming due") || text.includes("due")) {
+    } else if (containsAny(text, ["coming due", "due", "expiring", "expire", "expiry"])) {
       type = "Due";
     }
 
@@ -258,12 +418,12 @@ function routeLocally(query) {
       params: {
         type,
         certType,
-        keyword: description || ""
+        keyword
       }
     };
   }
 
-  if (text.includes("defect")) {
+  if (defectSignals) {
     let significant = "All";
     if (text.includes("critical") && text.includes("significant")) {
       significant = "Both";
@@ -276,7 +436,7 @@ function routeLocally(query) {
     let dueStatus = "All";
     if (text.includes("overdue")) {
       dueStatus = "OverDue";
-    } else if (text.includes("coming due") || text.includes("due")) {
+    } else if (containsAny(text, ["coming due", "due", "due soon"])) {
       dueStatus = "Not OverDue";
     }
 
@@ -296,34 +456,34 @@ function routeLocally(query) {
         significant,
         dueStatus,
         defectStatus,
-        keyword: description || ""
+        keyword
       }
     };
   }
 
-  if (text.includes("requisition")) {
+  if (requisitionSignals) {
     return {
       action: "requisitions_list",
       normalizedEnglish: query,
       params: {
-        statusText: firstMatch(query, /status\s*[:\-]?\s*([a-z0-9 -]+)/i) || "",
-        keyword: description || ""
+        statusText,
+        keyword
       }
     };
   }
 
-  if (text.includes("purchase order") || text.includes("po status") || text.includes("po ") || text.includes("material receipt") || text.includes("invoice")) {
+  if (purchaseSignals) {
     return {
       action: "purchase_orders_list",
       normalizedEnglish: query,
       params: {
-        statusText: firstMatch(query, /status\s*[:\-]?\s*([a-z0-9 -]+)/i) || "",
-        keyword: description || ""
+        statusText,
+        keyword
       }
     };
   }
 
-  if (text.includes("detail") || text.includes("instruction") || text.includes("read job") || text.includes("read maintenance")) {
+  if (detailSignals && (jobId || maintenanceSignals)) {
     return {
       action: "maintenance_detail",
       normalizedEnglish: query,
@@ -331,17 +491,22 @@ function routeLocally(query) {
     };
   }
 
-  if (text.includes("maintenance") || text.includes("job") || text.includes("overdue") || text.includes("critical") || text.includes("non critical")) {
+  if (
+    maintenanceSignals ||
+    text.includes("overdue") ||
+    (text.includes("critical") && !defectSignals && !certificateSignals) ||
+    text.includes("non critical")
+  ) {
     return {
       action: "maintenance_list",
       normalizedEnglish: query,
       params: {
         overdueOnly: text.includes("overdue"),
-        dueOnly: text.includes("coming due") || /\bdue\b/.test(text),
+        dueOnly: containsAny(text, ["coming due", "due soon", "due", "next week", "next month", "this week", "this month", "tomorrow"]),
         criticalOnly: text.includes("critical") && !text.includes("non critical"),
-        nonCriticalOnly: text.includes("non critical"),
-        keyword: description || "",
-        dueWindowDays: findNumberLike(query, /next\s+(\d+)\s+days/i) || findNumberLike(query, /due in\s+(\d+)\s+days/i)
+        nonCriticalOnly: containsAny(text, ["non critical", "non-critical", "normal jobs", "routine jobs"]),
+        keyword,
+        dueWindowDays
       }
     };
   }
@@ -373,23 +538,16 @@ function reconcileRoute(query, aiRoute, localRoute) {
   const local = localRoute && typeof localRoute === "object" ? localRoute : {};
 
   const maintenanceSignals =
-    text.includes("maintenance") ||
-    text.includes("work order") ||
-    text.includes("workorder") ||
-    text.includes("job") ||
+    containsAny(text, ["maintenance", "work order", "workorder", "job", "jobs", "planned maintenance", "inspection"]) ||
     /\bwo[-\s]?\d+/i.test(query) ||
-    (text.includes("overdue") && !text.includes("defect") && !text.includes("certificate") && !text.includes("requisition"));
+    (text.includes("overdue") && !containsAny(text, ["defect", "certificate", "survey", "requisition", "purchase order", "material receipt"]));
 
-  const defectSignals = text.includes("defect");
-  const certificateSignals = text.includes("certificate") || text.includes("survey");
-  const requisitionSignals = text.includes("requisition");
+  const defectSignals = containsAny(text, ["defect", "deficiency"]);
+  const certificateSignals = containsAny(text, ["certificate", "survey", "expiry", "expiring"]);
+  const requisitionSignals = containsAny(text, ["requisition", "purchase request", "rfq", "inquiry"]);
   const purchaseSignals =
     !requisitionSignals &&
-    (text.includes("purchase order") ||
-      text.includes("po ") ||
-      text.includes("po status") ||
-      text.includes("material receipt") ||
-      text.includes("invoice"));
+    containsAny(text, ["purchase order", "po ", "po status", "material receipt", "invoice", "goods receipt", "procurement"]);
 
   if (defectSignals && ai.action !== "defects_list") {
     return local;
@@ -423,6 +581,22 @@ function reconcileRoute(query, aiRoute, localRoute) {
     },
     normalizedEnglish: ai.normalizedEnglish || local.normalizedEnglish || query
   };
+}
+
+function targetSystemForAction(action, fallbackSystemKey) {
+  if (["requisitions_list", "purchase_orders_list", "requisition_detail", "requisition_create"].includes(action)) {
+    return "purchase";
+  }
+
+  if (["maintenance_list", "maintenance_detail", "defects_list", "certificates_list", "close_job", "postponement"].includes(action)) {
+    return "pms";
+  }
+
+  return fallbackSystemKey === "purchase" ? "purchase" : "pms";
+}
+
+function systemLabel(systemKey) {
+  return systemKey === "purchase" ? "Purchase Link" : "PMS Link";
 }
 
 function summarizeResult(result) {
@@ -1150,18 +1324,22 @@ async function confirmCopilotAction({ client, session, systemKey, action, payloa
   throw new Error(`Unsupported confirmation action: ${action}`);
 }
 
-async function executeCopilotQuery({ client, session, query, systemKey }) {
+async function executeCopilotQuery({ client, session, sessions, query, systemKey }) {
   const routed = await routePrompt(query, systemKey);
   const action = routed.action || "help";
-  const targetSystem = systemKey === "purchase" ? "Purchase Link" : "PMS Link";
+  const effectiveSystemKey = targetSystemForAction(action, systemKey);
+  const effectiveSession = sessions?.[effectiveSystemKey] || (effectiveSystemKey === systemKey ? session : null);
+  const targetSystem = systemLabel(effectiveSystemKey);
   const normalizedEnglish = routed.normalizedEnglish || query;
+  const autoRoutedNotice =
+    effectiveSystemKey !== systemKey && effectiveSession ? `I automatically used ${targetSystem} for this request. ` : "";
 
   if (action === "help") {
     return {
       intent: "Capabilities",
       normalizedEnglish,
       reply:
-        systemKey === "purchase"
+        effectiveSystemKey === "purchase"
           ? "I can list requisitions, PO status, material receipt visibility, show requisition detail, and prepare requisition-create actions."
           : "I can list maintenance, overdue jobs, critical jobs, defects, certificates, and prepare close or postponement actions.",
       result: null,
@@ -1169,7 +1347,7 @@ async function executeCopilotQuery({ client, session, query, systemKey }) {
     };
   }
 
-  if (!session) {
+  if (!effectiveSession) {
     return {
       intent: "Authentication required",
       normalizedEnglish,
@@ -1180,7 +1358,7 @@ async function executeCopilotQuery({ client, session, query, systemKey }) {
   }
 
   if (action === "maintenance_detail") {
-    if (systemKey === "purchase") {
+    if (effectiveSystemKey === "purchase") {
       return {
         intent: "Maintenance detail",
         normalizedEnglish,
@@ -1190,19 +1368,19 @@ async function executeCopilotQuery({ client, session, query, systemKey }) {
       };
     }
 
-    const result = await client.getJobDetail(systemKey, session, routed.params?.jobId || "");
+    const result = await client.getJobDetail(effectiveSystemKey, effectiveSession, routed.params?.jobId || "");
     const detail = unwrapResultData(result);
     return {
       intent: "Maintenance detail",
       normalizedEnglish,
-      reply: summarizeResult(result),
+      reply: `${autoRoutedNotice}${summarizeResult(result)}`.trim(),
       result,
       presentation: result.ok ? buildMaintenanceDetailPresentation(detail) : null
     };
   }
 
   if (action === "maintenance_list") {
-    if (systemKey === "purchase") {
+    if (effectiveSystemKey === "purchase") {
       return {
         intent: "Maintenance jobs",
         normalizedEnglish,
@@ -1212,7 +1390,7 @@ async function executeCopilotQuery({ client, session, query, systemKey }) {
       };
     }
 
-    const result = await client.listDueJobs(systemKey, session, buildPmsForecastQuery(routed.params || {}));
+    const result = await client.listDueJobs(effectiveSystemKey, effectiveSession, buildPmsForecastQuery(routed.params || {}));
     const presentation = result.ok ? buildMaintenancePresentation(result, routed.params || {}) : null;
     const hasActiveMaintenanceFilter =
       Boolean(routed.params?.overdueOnly) ||
@@ -1230,14 +1408,14 @@ async function executeCopilotQuery({ client, session, query, systemKey }) {
     return {
       intent: "Maintenance jobs",
       normalizedEnglish,
-      reply,
+      reply: `${autoRoutedNotice}${reply}`.trim(),
       result,
       presentation
     };
   }
 
   if (action === "defects_list") {
-    if (systemKey === "purchase") {
+    if (effectiveSystemKey === "purchase") {
       return {
         intent: "Defects",
         normalizedEnglish,
@@ -1247,18 +1425,18 @@ async function executeCopilotQuery({ client, session, query, systemKey }) {
       };
     }
 
-    const result = await client.listDefects(systemKey, session, buildDefectQuery(routed.params || {}));
+    const result = await client.listDefects(effectiveSystemKey, effectiveSession, buildDefectQuery(routed.params || {}));
     return {
       intent: "Defects",
       normalizedEnglish,
-      reply: summarizeResult(result),
+      reply: `${autoRoutedNotice}${summarizeResult(result)}`.trim(),
       result,
       presentation: result.ok ? buildDefectPresentation(result) : null
     };
   }
 
   if (action === "certificates_list") {
-    if (systemKey === "purchase") {
+    if (effectiveSystemKey === "purchase") {
       return {
         intent: "Certificates and surveys",
         normalizedEnglish,
@@ -1268,18 +1446,18 @@ async function executeCopilotQuery({ client, session, query, systemKey }) {
       };
     }
 
-    const result = await client.listCertificates(systemKey, session, buildCertificateQuery(routed.params || {}));
+    const result = await client.listCertificates(effectiveSystemKey, effectiveSession, buildCertificateQuery(routed.params || {}));
     return {
       intent: "Certificates and surveys",
       normalizedEnglish,
-      reply: summarizeResult(result),
+      reply: `${autoRoutedNotice}${summarizeResult(result)}`.trim(),
       result,
       presentation: result.ok ? buildCertificatePresentation(result, routed.params || {}) : null
     };
   }
 
   if (action === "requisitions_list") {
-    if (systemKey !== "purchase") {
+    if (effectiveSystemKey !== "purchase") {
       return {
         intent: "Requisitions",
         normalizedEnglish,
@@ -1290,8 +1468,8 @@ async function executeCopilotQuery({ client, session, query, systemKey }) {
     }
 
     const result = await client.procurementFollowUp(
-      systemKey,
-      session,
+      effectiveSystemKey,
+      effectiveSession,
       buildPurchaseTrackingQuery({ ...(routed.params || {}), track: "Requisition Track" })
     );
     if (result.ok && routed.params?.statusText) {
@@ -1301,14 +1479,14 @@ async function executeCopilotQuery({ client, session, query, systemKey }) {
     return {
       intent: "Requisitions",
       normalizedEnglish,
-      reply: summarizeResult(result),
+      reply: `${autoRoutedNotice}${summarizeResult(result)}`.trim(),
       result,
       presentation: result.ok ? buildRequisitionListPresentation(result) : null
     };
   }
 
   if (action === "purchase_orders_list") {
-    if (systemKey !== "purchase") {
+    if (effectiveSystemKey !== "purchase") {
       return {
         intent: "Purchase orders",
         normalizedEnglish,
@@ -1319,8 +1497,8 @@ async function executeCopilotQuery({ client, session, query, systemKey }) {
     }
 
     const result = await client.procurementFollowUp(
-      systemKey,
-      session,
+      effectiveSystemKey,
+      effectiveSession,
       buildPurchaseTrackingQuery({ ...(routed.params || {}), track: "PO Track" })
     );
     if (result.ok && routed.params?.statusText) {
@@ -1330,14 +1508,14 @@ async function executeCopilotQuery({ client, session, query, systemKey }) {
     return {
       intent: "Purchase orders",
       normalizedEnglish,
-      reply: summarizeResult(result),
+      reply: `${autoRoutedNotice}${summarizeResult(result)}`.trim(),
       result,
       presentation: result.ok ? buildPurchaseOrderPresentation(result) : null
     };
   }
 
   if (action === "requisition_detail") {
-    if (systemKey !== "purchase") {
+    if (effectiveSystemKey !== "purchase") {
       return {
         intent: "Requisition detail",
         normalizedEnglish,
@@ -1347,12 +1525,12 @@ async function executeCopilotQuery({ client, session, query, systemKey }) {
       };
     }
 
-    const detailResult = await client.getRequisitionDetail(systemKey, session, routed.params?.requisitionId || "");
+    const detailResult = await client.getRequisitionDetail(effectiveSystemKey, effectiveSession, routed.params?.requisitionId || "");
     const workflowResult = routed.params?.includeWorkflow
-      ? await client.getRequisitionLog(systemKey, session, routed.params?.requisitionId || "")
+      ? await client.getRequisitionLog(effectiveSystemKey, effectiveSession, routed.params?.requisitionId || "")
       : null;
     const deliveryResult = routed.params?.includeDelivery
-      ? await client.getRequisitionDeliveryInfo(systemKey, session, routed.params?.requisitionId || "")
+      ? await client.getRequisitionDeliveryInfo(effectiveSystemKey, effectiveSession, routed.params?.requisitionId || "")
       : null;
 
     const detail = unwrapResultData(detailResult);
@@ -1362,7 +1540,7 @@ async function executeCopilotQuery({ client, session, query, systemKey }) {
     return {
       intent: "Requisition detail",
       normalizedEnglish,
-      reply: summarizeResult(detailResult),
+      reply: `${autoRoutedNotice}${summarizeResult(detailResult)}`.trim(),
       result: {
         detail: detailResult,
         workflow: workflowResult,
@@ -1373,7 +1551,7 @@ async function executeCopilotQuery({ client, session, query, systemKey }) {
   }
 
   if (action === "close_job") {
-    if (systemKey === "purchase") {
+    if (effectiveSystemKey === "purchase") {
       return {
         intent: "Close maintenance",
         normalizedEnglish,
@@ -1383,7 +1561,7 @@ async function executeCopilotQuery({ client, session, query, systemKey }) {
       };
     }
 
-    const context = await resolvePmsJobContext(client, session, routed.params?.jobId || "");
+    const context = await resolvePmsJobContext(client, effectiveSession, routed.params?.jobId || "");
     if (!context.ok) {
       return buildDraftResult(
         "Close maintenance draft",
@@ -1417,10 +1595,10 @@ async function executeCopilotQuery({ client, session, query, systemKey }) {
     return buildPendingConfirmation(
       "Close maintenance ready",
       normalizedEnglish,
-      "I parsed the live maintenance completion payload. Confirm in the UI to submit it to Mazik.",
+      `${autoRoutedNotice}I parsed the live maintenance completion payload. Confirm in the UI to submit it to Mazik.`.trim(),
       {
         action: "close_job",
-        systemKey,
+        systemKey: effectiveSystemKey,
         jobId: context.jobId,
         payload
       },
@@ -1436,7 +1614,7 @@ async function executeCopilotQuery({ client, session, query, systemKey }) {
   }
 
   if (action === "postponement") {
-    if (systemKey === "purchase") {
+    if (effectiveSystemKey === "purchase") {
       return {
         intent: "Postponement",
         normalizedEnglish,
@@ -1446,7 +1624,7 @@ async function executeCopilotQuery({ client, session, query, systemKey }) {
       };
     }
 
-    const context = await resolvePmsJobContext(client, session, routed.params?.jobId || "");
+    const context = await resolvePmsJobContext(client, effectiveSession, routed.params?.jobId || "");
     if (!context.ok) {
       return buildDraftResult(
         "Postponement draft",
@@ -1480,10 +1658,10 @@ async function executeCopilotQuery({ client, session, query, systemKey }) {
     return buildPendingConfirmation(
       "Postponement ready",
       normalizedEnglish,
-      "I parsed the live postponement payload. Confirm in the UI to submit it to Mazik.",
+      `${autoRoutedNotice}I parsed the live postponement payload. Confirm in the UI to submit it to Mazik.`.trim(),
       {
         action: "postponement",
-        systemKey,
+        systemKey: effectiveSystemKey,
         jobId: context.jobId,
         payload
       },
@@ -1499,7 +1677,7 @@ async function executeCopilotQuery({ client, session, query, systemKey }) {
   }
 
   if (action === "requisition_create") {
-    if (systemKey !== "purchase") {
+    if (effectiveSystemKey !== "purchase") {
       return {
         intent: "Requisition creation",
         normalizedEnglish,
@@ -1530,10 +1708,10 @@ async function executeCopilotQuery({ client, session, query, systemKey }) {
     return buildPendingConfirmation(
       "Requisition ready",
       normalizedEnglish,
-      "I parsed the requisition payload. Confirm in the UI to submit it to Mazik.",
+      `${autoRoutedNotice}I parsed the requisition payload. Confirm in the UI to submit it to Mazik.`.trim(),
       {
         action: "requisition_create",
-        systemKey,
+        systemKey: effectiveSystemKey,
         payload
       },
       buildPayloadPresentation(
