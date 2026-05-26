@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Mazik PMS Copilot Connector</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">Real Connector Starter</p>
+        <h1>Mazik PMS Copilot</h1>
+        <p class="lede">A real integration shell for PMS Link maintenance workflows and Purchase Link requisition workflows, using the live Mazik auth APIs and configurable business endpoints.</p>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <h2>Active System</h2>
+          <div class="stack">
+            <label>Target system
+              <select id="systemKey">
+                <option value="pms">PMS Link</option>
+                <option value="purchase">Purchase Link</option>
+              </select>
+            </label>
+            <label>Mazik Username<input id="username"></label>
+            <label>Mazik Password<input id="password" type="password"></label>
+            <div class="actions">
+              <button id="loginButton">Login</button>
+              <button id="logoutButton" class="ghost">Logout Selected</button>
+            </div>
+            <pre id="sessionStatus" class="console muted">Loading session state...</pre>
+          </div>
+        </article>
+
+        <article class="panel">
+          <h2>Deep Links</h2>
+          <div class="stack">
+            <div class="link-card">
+              <strong>PMS maintenance forecast</strong>
+              <a id="pmsForecastLink" target="_blank" rel="noreferrer">Open PMS maintenance forecast</a>
+            </div>
+            <div class="link-card">
+              <strong>Purchase requisition tracking</strong>
+              <a id="purchaseTrackingLink" target="_blank" rel="noreferrer">Open Purchase requisition tracking</a>
+            </div>
+            <pre id="discoveryBox" class="console muted">Live discovery notes will appear here.</pre>
+          </div>
+        </article>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <h2>PMS Link Config</h2>
+          <div class="stack">
+            <label>PMS Web Base URL<input id="pmsWebBaseUrl"></label>
+            <label>PMS API Base URL<input id="pmsApiBaseUrl"></label>
+            <label>Maintenance Forecast Route<input id="pmsMaintenanceForecastUrl"></label>
+            <label>Due Jobs Path<input id="pmsDueJobsPath" placeholder="Example after confirmation"></label>
+            <label>Job Detail Path<input id="pmsJobDetailPath" placeholder="Example: jobs/{jobId}"></label>
+            <label>Close Job Path<input id="pmsCloseJobPath" placeholder="Example: jobs/{jobId}/status"></label>
+            <label>Postponement Path<input id="pmsPostponementPath"></label>
+            <label>PMS Requisition Path<input id="pmsRequisitionPath"></label>
+          </div>
+        </article>
+
+        <article class="panel">
+          <h2>Purchase Link Config</h2>
+          <div class="stack">
+            <label>Purchase Web Base URL<input id="purchaseWebBaseUrl"></label>
+            <label>Purchase API Base URL<input id="purchaseApiBaseUrl"></label>
+            <label>Requisition Tracking Route<input id="purchaseRequisitionTrackingUrl"></label>
+            <label>Purchase Requisition Path<input id="purchaseRequisitionPath"></label>
+            <label>Purchase Follow-up Path<input id="purchaseFollowupPath"></label>
+            <div class="actions">
+              <button id="saveSettings">Save All Settings</button>
+              <button id="probeButton">Probe Current System Path</button>
+            </div>
+            <pre id="probeResult" class="console muted">Probe output will appear here.</pre>
+          </div>
+        </article>
+      </section>
+
+      <section class="panel">
+        <h2>Copilot Query</h2>
+        <div class="stack">
+          <label>Ask the copilot<textarea id="queryInput" rows="4" placeholder="Show due jobs for the next 7 days or raise a requisition for class survey"></textarea></label>
+          <div class="actions">
+            <button id="runQuery">Run Query</button>
+          </div>
+          <div class="result-grid">
+            <div>
+              <h3>Intent</h3>
+              <pre id="intentBox" class="console muted">Waiting for a query...</pre>
+            </div>
+            <div>
+              <h3>Normalized English</h3>
+              <pre id="normalizedBox" class="console muted">Waiting for a query...</pre>
+            </div>
+          </div>
+          <div>
+            <h3>Reply</h3>
+            <pre id="replyBox" class="console muted">Waiting for a query...</pre>
+          </div>
+          <div>
+            <h3>Live API Result</h3>
+            <pre id="resultBox" class="console muted">Live API output will appear here.</pre>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

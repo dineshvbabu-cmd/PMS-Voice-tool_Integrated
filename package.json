@@ -1,0 +1,10 @@
+{
+  "name": "mazik-pms-copilot-connector",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Real connector starter for PMS Link and procurement-backed copilot flows.",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js && node --check lib/pmslink-client.js && node --check lib/copilot.js && node --check public/app.js"
+  }
+}
