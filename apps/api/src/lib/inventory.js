@@ -204,11 +204,16 @@ const liveEndpoints = {
 };
 
 const samplePrompts = [
-  "Show maintenance forecast for Woodstock due in the next 30 days.",
-  "Read the maintenance detail for ship component job link 87196.",
-  "Show postponed jobs awaiting approval for Alkebulan.",
-  "List requisitions in PO SEND status for Alkebulan.",
-  "Show the workflow log for requisition 17209.",
+  "Show all overdue maintenances.",
+  "Show critical overdue maintenances.",
+  "Read the maintenance detail for ship component job link 82225.",
+  "Show open overdue defects.",
+  "Show critical defects coming due.",
+  "Show certificates overdue.",
+  "Show certificates due in 30 days.",
+  "List requisitions in PO SEND status.",
+  "Show purchase orders and material receipt status.",
+  "Show requisition 17209 detail with workflow log and delivery info.",
   "Close ship component job link 82225 completed on 2026-05-26 with remarks valve checked satisfactory.",
   "Postpone ship component job link 82225 until 2026-06-10 with reason 5, approver 152, and remarks awaiting spares.",
   "Create requisition with payload {\"Requisition\":{\"vesselId\":203,\"description\":\"Class occasional survey service\"},\"items\":[],\"templateItems\":[],\"workflow\":\"1\"}."

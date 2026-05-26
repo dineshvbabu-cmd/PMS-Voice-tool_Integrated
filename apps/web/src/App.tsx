@@ -1,25 +1,16 @@
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  Activity,
-  ArrowUpRight,
-  Bot,
-  Cable,
-  CheckCircle2,
-  ChevronRight,
-  Compass,
-  Database,
-  KeyRound,
-  Layers3,
-  Link2,
-  Radar,
-  Save,
-  SearchCheck,
-  Send,
-  Sparkles
-} from "lucide-react";
+import { CheckCircle2, ExternalLink, KeyRound, ListFilter, LoaderCircle, Send, ShieldCheck, Sparkles } from "lucide-react";
 
 type SystemKey = "pms" | "purchase";
+
+type SessionState = {
+  authenticated: boolean;
+  createdAt: string;
+  hasToken: boolean;
+  hasCookies: boolean;
+  lastLoginStatus: number;
+};
 
 type BootstrapResponse = {
   product: {
@@ -35,66 +26,76 @@ type BootstrapResponse = {
       landingUrl: string;
     }
   >;
-  settings: Record<string, string | boolean | string[] | Record<string, string>>;
+  settings: Record<string, unknown>;
   session: Record<SystemKey, SessionState | null>;
-  discoveredFacts: string[];
   samplePrompts: string[];
 };
 
-type SessionState = {
-  authenticated: boolean;
-  createdAt: string;
-  hasToken: boolean;
-  hasCookies: boolean;
-  lastLoginStatus: number;
+type SummaryItem = {
+  label: string;
+  value: string | number;
 };
 
-type InventoryResponse = {
-  pmsRoutes: string[];
-  purchaseRouteGroups: Array<{ category: string; routes: string[] }>;
-  liveEndpoints: {
-    pms: {
-      read: InventoryEndpoint[];
-      write: InventoryEndpoint[];
-      support: string[];
-    };
-    purchase: {
-      read: InventoryEndpoint[];
-      write: InventoryEndpoint[];
-      support: string[];
-    };
-  };
-};
-
-type InventoryEndpoint = {
+type TableColumn = {
   key: string;
   label: string;
-  method: string;
-  path: string;
-  notes: string;
 };
+
+type TableRow = Record<string, unknown> & {
+  id: string;
+  raw?: Record<string, unknown>;
+};
+
+type RowAction = {
+  label: string;
+  promptTemplate?: string;
+  urlTemplate?: string;
+};
+
+type TablePresentation = {
+  type: "table";
+  title: string;
+  subtitle?: string;
+  columns: TableColumn[];
+  rows: TableRow[];
+  summary?: SummaryItem[];
+  rowActions?: RowAction[];
+};
+
+type DetailPresentation = {
+  type: "detail";
+  title: string;
+  subtitle?: string;
+  fields: Array<{ label: string; value: string }>;
+};
+
+type PayloadPresentation = {
+  type: "payload";
+  title: string;
+  message?: string;
+  payload: unknown;
+  missingFields?: string[];
+  actionName?: string;
+  context?: Record<string, string>;
+};
+
+type Presentation = TablePresentation | DetailPresentation | PayloadPresentation | null;
 
 type QueryResponse = {
   intent: string;
   normalizedEnglish: string;
   reply: string;
-  result: unknown;
-};
-
-type SettingsForm = {
-  pmsWebBaseUrl: string;
-  pmsApiBaseUrl: string;
-  pmsMaintenanceForecastUrl: string;
-  pmsDueJobsPath: string;
-  pmsJobDetailPath: string;
-  pmsCloseJobPath: string;
-  pmsPostponementPath: string;
-  pmsRequisitionPath: string;
-  purchaseWebBaseUrl: string;
-  purchaseApiBaseUrl: string;
-  purchaseRequisitionTrackingUrl: string;
-  purchaseRequisitionPath: string;
-  purchaseFollowupPath: string;
+  result: {
+    pendingConfirmation?: boolean;
+    pendingAction?: {
+      action: string;
+      systemKey: SystemKey;
+      jobId?: string;
+      payload: unknown;
+    };
+    [key: string]: unknown;
+  } | null;
+  presentation: Presentation;
 };
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") || "http://localhost:3100";
@@ -138,93 +139,59 @@ async function apiFetch<T>(path: string, options: RequestInit = {}) {
   return payload;
 }
 
-function createSettingsForm(bootstrap?: BootstrapResponse): SettingsForm {
-  return {
-    pmsWebBaseUrl: String(bootstrap?.settings.pmsWebBaseUrl || ""),
-    pmsApiBaseUrl: String(bootstrap?.settings.pmsApiBaseUrl || ""),
-    pmsMaintenanceForecastUrl: String(bootstrap?.settings.pmsMaintenanceForecastUrl || ""),
-    pmsDueJobsPath: String(bootstrap?.settings.pmsDueJobsPath || ""),
-    pmsJobDetailPath: String(bootstrap?.settings.pmsJobDetailPath || ""),
-    pmsCloseJobPath: String(bootstrap?.settings.pmsCloseJobPath || ""),
-    pmsPostponementPath: String(bootstrap?.settings.pmsPostponementPath || ""),
-    pmsRequisitionPath: String(bootstrap?.settings.pmsRequisitionPath || ""),
-    purchaseWebBaseUrl: String(bootstrap?.settings.purchaseWebBaseUrl || ""),
-    purchaseApiBaseUrl: String(bootstrap?.settings.purchaseApiBaseUrl || ""),
-    purchaseRequisitionTrackingUrl: String(bootstrap?.settings.purchaseRequisitionTrackingUrl || ""),
-    purchaseRequisitionPath: String(bootstrap?.settings.purchaseRequisitionPath || ""),
-    purchaseFollowupPath: String(bootstrap?.settings.purchaseFollowupPath || "")
-  };
+function formatJson(value: unknown) {
+  return JSON.stringify(value, null, 2);
 }
 
-function formatJson(value: unknown) {
-  if (typeof value === "string") {
+function formatDate(value?: string | null) {
+  if (!value) {
+    return "-";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
     return value;
   }
 
-  return JSON.stringify(value, null, 2);
+  return date.toISOString().slice(0, 10);
+}
+
+function interpolateTemplate(template: string, row?: TableRow | null) {
+  const today = new Date();
+  const plus30 = new Date(today);
+  plus30.setDate(plus30.getDate() + 30);
+
+  const source = {
+    ...(row || {}),
+    ...(row?.raw || {}),
+    today: today.toISOString().slice(0, 10),
+    plus30: plus30.toISOString().slice(0, 10)
+  } as Record<string, unknown>;
+
+  return template.replace(/\{\{([^}]+)\}\}/g, (_, key) => String(source[key.trim()] ?? ""));
 }
 
 function App() {
   const queryClient = useQueryClient();
   const [systemKey, setSystemKey] = useState<SystemKey>("pms");
-  const [settingsForm, setSettingsForm] = useState<SettingsForm>(() => createSettingsForm());
-  const [inventoryOpen, setInventoryOpen] = useState(false);
   const [queryInput, setQueryInput] = useState("");
-  const [probePath, setProbePath] = useState("");
-  const [probeOutput, setProbeOutput] = useState("Choose a path and probe a live endpoint.");
-  const [commandOutput, setCommandOutput] = useState<QueryResponse | null>(null);
+  const [selectedRowId, setSelectedRowId] = useState<string>("");
+  const [showPromptLibrary, setShowPromptLibrary] = useState(false);
   const [authForm, setAuthForm] = useState({ username: "", password: "" });
-  const [isRefreshingState, startTransition] = useTransition();
+  const [commandOutput, setCommandOutput] = useState<QueryResponse | null>(null);
 
   const bootstrapQuery = useQuery({
     queryKey: ["bootstrap"],
     queryFn: () => apiFetch<BootstrapResponse>("/api/bootstrap", { method: "GET" })
   });
 
-  const inventoryQuery = useQuery({
-    queryKey: ["inventory"],
-    queryFn: () => apiFetch<InventoryResponse>("/api/inventory", { method: "GET" })
-  });
-
-  useEffect(() => {
-    if (bootstrapQuery.data) {
-      setSettingsForm(createSettingsForm(bootstrapQuery.data));
-      if (!probePath) {
-        setProbePath(
-          systemKey === "purchase"
-            ? String(bootstrapQuery.data.settings.purchaseFollowupPath || "")
-            : String(bootstrapQuery.data.settings.pmsDueJobsPath || "")
-        );
-      }
-    }
-  }, [bootstrapQuery.data]);
-
-  useEffect(() => {
-    setProbePath(
-      systemKey === "purchase" ? settingsForm.purchaseFollowupPath : settingsForm.pmsDueJobsPath
-    );
-  }, [systemKey, settingsForm.purchaseFollowupPath, settingsForm.pmsDueJobsPath]);
-
   const refreshBootstrap = () => {
-    startTransition(() => {
-      queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
-    });
+    queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
   };
-
-  const saveSettings = useMutation({
-    mutationFn: (payload: SettingsForm) =>
-      apiFetch<{ ok: boolean; settings: SettingsForm }>("/api/settings", {
-        method: "POST",
-        body: JSON.stringify(payload)
-      }),
-    onSuccess: () => {
-      refreshBootstrap();
-    }
-  });
 
   const loginMutation = useMutation({
     mutationFn: () =>
-      apiFetch<{ sessionId: string; message: string; loginPayload: unknown }>("/api/auth/login", {
+      apiFetch<{ sessionId: string }>("/api/auth/login", {
         method: "POST",
         body: JSON.stringify({
           systemKey,
@@ -249,28 +216,13 @@ function App() {
     }
   });
 
-  const probeMutation = useMutation({
-    mutationFn: () =>
-      apiFetch<{ ok: boolean; result: unknown }>("/api/probe", {
-        method: "POST",
-        body: JSON.stringify({
-          systemKey,
-          path: probePath,
-          method: "GET"
-        })
-      }),
-    onSuccess: (payload) => {
-      setProbeOutput(formatJson(payload.result));
-    }
-  });
-
   const queryMutation = useMutation({
-    mutationFn: () =>
+    mutationFn: (prompt: string) =>
       apiFetch<QueryResponse>("/api/copilot/query", {
         method: "POST",
         body: JSON.stringify({
           systemKey,
-          query: queryInput
+          query: prompt
         })
       }),
     onSuccess: (payload) => {
@@ -278,365 +230,334 @@ function App() {
     }
   });
 
-  const bootstrap = bootstrapQuery.data;
-  const inventory = inventoryQuery.data;
-  const currentSession = bootstrap?.session?.[systemKey] || null;
-  const endpointSuggestions =
-    systemKey === "purchase" ? inventory?.liveEndpoints.purchase.read || [] : inventory?.liveEndpoints.pms.read || [];
-  const writeSuggestions =
-    systemKey === "purchase" ? inventory?.liveEndpoints.purchase.write || [] : inventory?.liveEndpoints.pms.write || [];
+  const confirmMutation = useMutation({
+    mutationFn: (pendingAction: { action: string; systemKey: SystemKey; jobId?: string; payload: unknown }) =>
+      apiFetch<QueryResponse>("/api/copilot/confirm", {
+        method: "POST",
+        body: JSON.stringify(pendingAction)
+      }),
+    onSuccess: (payload) => {
+      setCommandOutput(payload);
+    }
+  });
 
-  const routeSummary =
-    systemKey === "purchase"
-      ? inventory?.purchaseRouteGroups.flatMap((group) => group.routes) || []
-      : inventory?.pmsRoutes || [];
+  const bootstrap = bootstrapQuery.data;
+  const session = bootstrap?.session?.[systemKey] || null;
+  const samplePrompts = bootstrap?.samplePrompts || [];
+  const presentation = commandOutput?.presentation || null;
+
+  const selectedRow = useMemo(() => {
+    if (!presentation || presentation.type !== "table") {
+      return null;
+    }
+
+    return presentation.rows.find((row) => row.id === selectedRowId) || presentation.rows[0] || null;
+  }, [presentation, selectedRowId]);
+
+  useEffect(() => {
+    if (presentation?.type === "table" && presentation.rows.length > 0) {
+      setSelectedRowId((current) =>
+        presentation.rows.some((row) => row.id === current) ? current : presentation.rows[0].id
+      );
+    } else {
+      setSelectedRowId("");
+    }
+  }, [presentation]);
+
+  const pendingAction = commandOutput?.result?.pendingConfirmation ? commandOutput.result.pendingAction : null;
+
+  const runPrompt = (prompt: string) => {
+    setQueryInput(prompt);
+    queryMutation.mutate(prompt);
+  };
 
   return (
-    <div className="app-shell">
-      <aside className="left-rail">
-        <div className="brand-block">
-          <div className="brand-mark">
+    <div className="compact-shell">
+      <section className="section-card login-section">
+        <div className="section-head">
+          <div>
+            <p className="eyebrow">Login</p>
+            <h1>{bootstrap?.product.name || "Atlas VoiceOps"}</h1>
+            <p className="subcopy">{bootstrap?.product.subtitle || "Mazik Connector Studio"}</p>
+          </div>
+          <div className={`status-chip ${session?.authenticated ? "online" : "offline"}`}>
+            {session?.authenticated ? "Connected" : "Not connected"}
+          </div>
+        </div>
+
+        <div className="system-toggle">
+          <button className={systemKey === "pms" ? "active" : ""} onClick={() => setSystemKey("pms")}>
+            PMS Link
+          </button>
+          <button className={systemKey === "purchase" ? "active" : ""} onClick={() => setSystemKey("purchase")}>
+            Purchase Link
+          </button>
+        </div>
+
+        <div className="login-links">
+          <a href={bootstrap?.systems[systemKey].landingUrl || "#"} target="_blank" rel="noreferrer">
+            Open live Mazik page
+            <ExternalLink size={14} />
+          </a>
+        </div>
+
+        <label className="field">
+          Username
+          <input
+            value={authForm.username}
+            onChange={(event) => setAuthForm((current) => ({ ...current, username: event.target.value }))}
+          />
+        </label>
+        <label className="field">
+          Password
+          <input
+            type="password"
+            value={authForm.password}
+            onChange={(event) => setAuthForm((current) => ({ ...current, password: event.target.value }))}
+          />
+        </label>
+
+        <div className="button-strip">
+          <button className="primary-button" onClick={() => loginMutation.mutate()} disabled={loginMutation.isPending}>
+            <KeyRound size={16} />
+            {loginMutation.isPending ? "Logging in" : "Login"}
+          </button>
+          <button className="secondary-button" onClick={() => logoutMutation.mutate()} disabled={logoutMutation.isPending}>
+            Logout
+          </button>
+        </div>
+
+        <div className="session-box">
+          <div className="session-row">
+            <span>PMS Link</span>
+            <strong>{bootstrap?.session.pms?.authenticated ? "Live session" : "Not logged in"}</strong>
+          </div>
+          <div className="session-row">
+            <span>Purchase Link</span>
+            <strong>{bootstrap?.session.purchase?.authenticated ? "Live session" : "Not logged in"}</strong>
+          </div>
+          <div className="session-row">
+            <span>Active API</span>
+            <strong>{bootstrap?.systems[systemKey].apiBaseUrl || "-"}</strong>
+          </div>
+        </div>
+      </section>
+
+      <section className="section-card console-section">
+        <div className="section-head">
+          <div>
+            <p className="eyebrow">Command Console</p>
+            <h2>Query Mazik live data or prepare a real action</h2>
+          </div>
+          <button className="ghost-button" onClick={() => setShowPromptLibrary((current) => !current)}>
+            <ListFilter size={16} />
+            {showPromptLibrary ? "Hide prompts" : "Sample prompts"}
+          </button>
+        </div>
+
+        <div className="assistant-banner">
+          <div className="assistant-mark">
             <Sparkles size={18} />
           </div>
           <div>
-            <p className="eyebrow">Integrated UI</p>
-            <h1>{bootstrap?.product.name || "Atlas VoiceOps"}</h1>
-            <p className="subline">{bootstrap?.product.subtitle || "Mazik Connector Studio"}</p>
+            <strong>{commandOutput?.intent || "Ready for a live query"}</strong>
+            <p>{commandOutput?.reply || "Ask for maintenances, defects, certificates, requisitions, PO status, or a write action to prepare."}</p>
           </div>
         </div>
 
-        <div className="rail-section">
-          <p className="rail-title">Systems</p>
+        <label className="field">
+          Prompt
+          <textarea
+            rows={6}
+            value={queryInput}
+            onChange={(event) => setQueryInput(event.target.value)}
+            placeholder="Show all overdue maintenances."
+          />
+        </label>
+
+        <div className="button-strip">
           <button
-            className={`system-card ${systemKey === "pms" ? "active" : ""}`}
-            onClick={() => setSystemKey("pms")}
+            className="primary-button"
+            onClick={() => queryMutation.mutate(queryInput)}
+            disabled={!queryInput || queryMutation.isPending}
           >
-            <div>
-              <strong>PMS Link</strong>
-              <span>Maintenance forecasting and closures</span>
-            </div>
-            <ChevronRight size={16} />
+            <Send size={16} />
+            {queryMutation.isPending ? "Running" : "Run"}
           </button>
-          <button
-            className={`system-card ${systemKey === "purchase" ? "active" : ""}`}
-            onClick={() => setSystemKey("purchase")}
-          >
-            <div>
-              <strong>Purchase Link</strong>
-              <span>Requisition tracking and workflow</span>
-            </div>
-            <ChevronRight size={16} />
-          </button>
+          {pendingAction ? (
+            <button
+              className="confirm-button"
+              onClick={() => confirmMutation.mutate(pendingAction)}
+              disabled={confirmMutation.isPending}
+            >
+              <ShieldCheck size={16} />
+              {confirmMutation.isPending ? "Submitting" : "Confirm action"}
+            </button>
+          ) : null}
         </div>
 
-        <div className="rail-section">
-          <p className="rail-title">Status</p>
-          <div className="stat-tile">
-            <Activity size={18} />
-            <div>
-              <strong>{currentSession?.authenticated ? "Authenticated" : "Awaiting login"}</strong>
-              <span>{systemKey === "pms" ? "PMS Link" : "Purchase Link"} session</span>
-            </div>
-          </div>
-          <div className="stat-tile">
-            <Database size={18} />
-            <div>
-              <strong>{routeSummary.length}</strong>
-              <span>Captured route ids</span>
-            </div>
-          </div>
-          <div className="stat-tile">
-            <Radar size={18} />
-            <div>
-              <strong>{endpointSuggestions.length}</strong>
-              <span>Live endpoint suggestions</span>
-            </div>
-          </div>
-          <div className="stat-tile">
-            <Send size={18} />
-            <div>
-              <strong>{writeSuggestions.length}</strong>
-              <span>Live write actions captured</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="rail-section">
-          <p className="rail-title">Prompt Library</p>
-          <div className="prompt-list">
-            {(bootstrap?.samplePrompts || []).map((prompt) => (
-              <button
-                key={prompt}
-                className="prompt-chip"
-                onClick={() => setQueryInput(prompt)}
-              >
+        {showPromptLibrary ? (
+          <div className="prompt-library">
+            {samplePrompts.map((prompt) => (
+              <button key={prompt} className="prompt-pill" onClick={() => runPrompt(prompt)}>
                 {prompt}
               </button>
             ))}
           </div>
+        ) : null}
+
+        <div className="console-meta">
+          <div>
+            <span>Normalized English</span>
+            <strong>{commandOutput?.normalizedEnglish || "-"}</strong>
+          </div>
+          <div>
+            <span>Write confirmation</span>
+            <strong>{pendingAction ? "Required" : "Not pending"}</strong>
+          </div>
         </div>
-      </aside>
+      </section>
 
-      <main className="workspace">
-        <section className="hero-card">
-          <div className="hero-copy">
-            <p className="eyebrow">Separated Frontend + Backend</p>
-            <h2>Production-shaped UI for Mazik PMS and procurement workflows</h2>
-            <p>
-              This frontend is prepared for a standalone Railway web service and talks to the API
-              over a stored session ID rather than same-site cookies, which makes the split deploy clean.
-            </p>
+      <section className="section-card results-section">
+        <div className="section-head">
+          <div>
+            <p className="eyebrow">Parsed Result</p>
+            <h2>{presentation?.title || "Live results will appear here"}</h2>
+            <p className="subcopy">{presentation && "subtitle" in presentation ? presentation.subtitle : "Run a prompt to render live Mazik data, payload confirmation, and action context."}</p>
           </div>
-          <div className="hero-metrics">
-            <div className="metric-card">
-              <Compass size={18} />
-              <strong>{bootstrap?.systems[systemKey].name || "Connector"}</strong>
-              <span>Active operating context</span>
+          {queryMutation.isPending || confirmMutation.isPending ? (
+            <div className="loader-chip">
+              <LoaderCircle size={16} className="spin" />
+              Working
             </div>
-            <div className="metric-card">
-              <Bot size={18} />
-              <strong>{bootstrap?.settings.openAiEnabled ? "OpenAI Ready" : "Rule Router Mode"}</strong>
-              <span>Command interpretation</span>
-            </div>
-            <div className="metric-card">
-              <Cable size={18} />
-              <strong>{isRefreshingState ? "Refreshing" : "Live API Wired"}</strong>
-              <span>Backend handshake</span>
-            </div>
+          ) : null}
+        </div>
+
+        {!presentation ? (
+          <div className="empty-state">
+            <CheckCircle2 size={18} />
+            <span>Try one of the sample prompts to load maintenances, defects, certificates, requisitions, or PO status.</span>
           </div>
-        </section>
+        ) : null}
 
-        <section className="workspace-grid">
-          <article className="panel panel-large">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">Command Console</p>
-                <h3>Ask the copilot or inspect a live endpoint</h3>
-              </div>
-              <button className="ghost-button" onClick={() => setInventoryOpen((value) => !value)}>
-                <Layers3 size={16} />
-                {inventoryOpen ? "Hide inventory" : "View inventory"}
-              </button>
-            </div>
-
-            <div className="assistant-card">
-              <div className="assistant-orb">
-                <div className="assistant-orb-core" />
-              </div>
-              <div>
-                <p className="assistant-state">Command router</p>
-                <h4>{commandOutput?.intent || "Ready for a query"}</h4>
-                <p className="assistant-copy">
-                  {commandOutput?.reply ||
-                    "Use the command bar to fetch live data, prepare drafts, or inspect connector behavior."}
-                </p>
-              </div>
-            </div>
-
-            <label className="input-label">
-              Command
-              <textarea
-                rows={4}
-                value={queryInput}
-                onChange={(event) => setQueryInput(event.target.value)}
-                placeholder="Show maintenance forecast for Woodstock due in the next 30 days."
-              />
-            </label>
-
-            <div className="button-row">
-              <button className="primary-button" onClick={() => queryMutation.mutate()} disabled={!queryInput || queryMutation.isPending}>
-                <Send size={16} />
-                Run command
-              </button>
-              <button className="secondary-button" onClick={() => probeMutation.mutate()} disabled={!probePath || probeMutation.isPending}>
-                <SearchCheck size={16} />
-                Probe path
-              </button>
-            </div>
-
-            <div className="response-grid">
-              <div className="response-card">
-                <p className="mini-title">Normalized English</p>
-                <pre>{commandOutput?.normalizedEnglish || "Waiting for a command."}</pre>
-              </div>
-              <div className="response-card">
-                <p className="mini-title">Probe output</p>
-                <pre>{probeOutput}</pre>
-              </div>
-              <div className="response-card response-card-wide">
-                <p className="mini-title">Result payload</p>
-                <pre>{commandOutput ? formatJson(commandOutput.result) : "Waiting for a live response."}</pre>
-              </div>
-            </div>
-          </article>
-
-          <article className="panel">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">Session</p>
-                <h3>Authenticate to the active system</h3>
-              </div>
-              <div className={`status-pill ${currentSession?.authenticated ? "online" : "offline"}`}>
-                {currentSession?.authenticated ? "Live session" : "Not logged in"}
-              </div>
-            </div>
-
-            <label className="input-label">
-              Mazik username
-              <input
-                value={authForm.username}
-                onChange={(event) => setAuthForm((current) => ({ ...current, username: event.target.value }))}
-              />
-            </label>
-            <label className="input-label">
-              Mazik password
-              <input
-                type="password"
-                value={authForm.password}
-                onChange={(event) => setAuthForm((current) => ({ ...current, password: event.target.value }))}
-              />
-            </label>
-
-            <div className="button-row">
-              <button className="primary-button" onClick={() => loginMutation.mutate()} disabled={loginMutation.isPending}>
-                <KeyRound size={16} />
-                Login
-              </button>
-              <button className="secondary-button" onClick={() => logoutMutation.mutate()} disabled={logoutMutation.isPending}>
-                <Link2 size={16} />
-                Logout
-              </button>
-            </div>
-
-            <pre className="console-box">
-              {formatJson(
-                currentSession || {
-                  authenticated: false,
-                  message: "No session established yet."
-                }
-              )}
-            </pre>
-          </article>
-
-          <article className="panel panel-wide">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">Connector Settings</p>
-                <h3>Live path and host configuration</h3>
-              </div>
-              <button className="primary-button" onClick={() => saveSettings.mutate(settingsForm)} disabled={saveSettings.isPending}>
-                <Save size={16} />
-                Save settings
-              </button>
-            </div>
-
-            <div className="form-grid">
-              {Object.entries(settingsForm).map(([key, value]) => (
-                <label className="input-label" key={key}>
-                  {key}
-                  <input
-                    value={value}
-                    onChange={(event) =>
-                      setSettingsForm((current) => ({
-                        ...current,
-                        [key]: event.target.value
-                      }))
-                    }
-                  />
-                </label>
+        {presentation?.type === "table" ? (
+          <div className="results-layout">
+            <div className="summary-grid">
+              {(presentation.summary || []).map((item) => (
+                <div key={item.label} className="summary-tile">
+                  <span>{item.label}</span>
+                  <strong>{item.value}</strong>
+                </div>
               ))}
             </div>
-          </article>
-        </section>
 
-        {inventoryOpen ? (
-          <section className="inventory-grid">
-            <article className="panel">
-              <div className="panel-header">
-                <div>
-                  <p className="eyebrow">Live Endpoints</p>
-                  <h3>Captured read endpoints</h3>
-                </div>
+            <div className="table-shell">
+              <div className="table-head">
+                {presentation.columns.map((column) => (
+                  <span key={column.key}>{column.label}</span>
+                ))}
               </div>
 
-              <div className="inventory-list">
-                {endpointSuggestions.map((endpoint) => (
+              <div className="table-body">
+                {presentation.rows.map((row) => (
                   <button
-                    key={endpoint.key}
-                    className="inventory-item"
-                    onClick={() =>
-                      setProbePath(endpoint.path)
-                    }
+                    key={row.id}
+                    className={`table-row ${selectedRow?.id === row.id ? "selected" : ""}`}
+                    onClick={() => setSelectedRowId(row.id)}
                   >
-                    <div>
-                      <strong>{endpoint.label}</strong>
-                      <span>{endpoint.method} {endpoint.path}</span>
-                    </div>
-                    <ArrowUpRight size={16} />
+                    {presentation.columns.map((column) => (
+                      <span key={column.key}>{String(row[column.key] ?? "-")}</span>
+                    ))}
                   </button>
                 ))}
               </div>
-            </article>
+            </div>
 
-            <article className="panel">
-              <div className="panel-header">
-                <div>
-                  <p className="eyebrow">Write Actions</p>
-                  <h3>Captured live write endpoints</h3>
+            {selectedRow ? (
+              <div className="selected-panel">
+                <div className="selected-head">
+                  <strong>Selected record</strong>
+                  <span>ID {selectedRow.id}</span>
                 </div>
-              </div>
 
-              <div className="inventory-list">
-                {writeSuggestions.map((endpoint) => (
-                  <div key={endpoint.key} className="inventory-item">
-                    <div>
-                      <strong>{endpoint.label}</strong>
-                      <span>
-                        {endpoint.method} {endpoint.path}
-                      </span>
+                <div className="selected-grid">
+                  {presentation.columns.map((column) => (
+                    <div key={column.key} className="selected-field">
+                      <span>{column.label}</span>
+                      <strong>{String(selectedRow[column.key] ?? "-")}</strong>
                     </div>
-                    <ArrowUpRight size={16} />
-                  </div>
-                ))}
-              </div>
-            </article>
-
-            <article className="panel">
-              <div className="panel-header">
-                <div>
-                  <p className="eyebrow">Route Inventory</p>
-                  <h3>Captured route ids from the live session</h3>
+                  ))}
                 </div>
-              </div>
 
-              <div className="token-cloud">
-                {routeSummary.map((route) => (
-                  <span key={route} className="route-pill">
-                    {route}
-                  </span>
-                ))}
-              </div>
-            </article>
-
-            <article className="panel">
-              <div className="panel-header">
-                <div>
-                  <p className="eyebrow">Notes</p>
-                  <h3>Captured connector facts</h3>
-                </div>
-              </div>
-              <div className="notes-list">
-                {(bootstrap?.discoveredFacts || []).map((fact) => (
-                  <div key={fact} className="note-row">
-                    <CheckCircle2 size={16} />
-                    <span>{fact}</span>
+                {presentation.rowActions?.length ? (
+                  <div className="row-action-group">
+                    {presentation.rowActions.map((action) =>
+                      action.promptTemplate ? (
+                        <button
+                          key={action.label}
+                          className="secondary-button"
+                          onClick={() => runPrompt(interpolateTemplate(action.promptTemplate || "", selectedRow))}
+                        >
+                          {action.label}
+                        </button>
+                      ) : action.urlTemplate ? (
+                        <a
+                          key={action.label}
+                          className="secondary-link"
+                          href={interpolateTemplate(action.urlTemplate, selectedRow)}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {action.label}
+                        </a>
+                      ) : null
+                    )}
                   </div>
-                ))}
+                ) : null}
               </div>
-            </article>
-          </section>
+            ) : null}
+          </div>
         ) : null}
-      </main>
+
+        {presentation?.type === "detail" ? (
+          <div className="detail-grid">
+            {presentation.fields.map((field) => (
+              <div key={field.label} className="detail-card">
+                <span>{field.label}</span>
+                <strong>{field.value}</strong>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {presentation?.type === "payload" ? (
+          <div className="payload-layout">
+            <div className="payload-banner">
+              <strong>{presentation.message || "Review the parsed payload."}</strong>
+              {presentation.missingFields?.length ? (
+                <span>Missing: {presentation.missingFields.join(", ")}</span>
+              ) : (
+                <span>Ready for confirmation</span>
+              )}
+            </div>
+
+            {presentation.context ? (
+              <div className="detail-grid">
+                {Object.entries(presentation.context).map(([key, value]) => (
+                  value ? (
+                    <div key={key} className="detail-card">
+                      <span>{key}</span>
+                      <strong>{value}</strong>
+                    </div>
+                  ) : null
+                ))}
+              </div>
+            ) : null}
+
+            <pre className="payload-box">{formatJson(presentation.payload)}</pre>
+          </div>
+        ) : null}
+      </section>
     </div>
   );
 }

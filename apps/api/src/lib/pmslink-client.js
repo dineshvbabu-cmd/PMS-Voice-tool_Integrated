@@ -24,7 +24,7 @@ function buildUrl(baseUrl, endpointPath, query) {
   const url = new URL(joinUrl(baseUrl, endpointPath));
 
   Object.entries(query || {}).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && value !== "") {
+    if (value !== undefined && value !== null) {
       url.searchParams.set(key, String(value));
     }
   });
@@ -172,6 +172,14 @@ class PMSLinkClient {
     return this.request(systemKey, this.settings.pmsDueJobsPath, { session, query });
   }
 
+  async listDefects(systemKey, session, query) {
+    return this.request(systemKey, "ShipMaster/DefectPaginate", { session, query });
+  }
+
+  async listCertificates(systemKey, session, query) {
+    return this.request(systemKey, "ShipMaster/certificateExplorers", { session, query });
+  }
+
   async getJobDetail(systemKey, session, jobId) {
     const endpointPath = String(this.settings.pmsJobDetailPath || "").replace(
       "{jobId}",
@@ -218,6 +226,24 @@ class PMSLinkClient {
   async procurementFollowUp(systemKey, session, query) {
     const endpointPath = this.settings.purchaseFollowupPath;
     return this.request(systemKey, endpointPath, { session, query });
+  }
+
+  async getRequisitionDetail(systemKey, session, requisitionId) {
+    return this.request(systemKey, `PMRequisitionMaster/getRequisitionMasterById/${encodeURIComponent(requisitionId)}`, {
+      session
+    });
+  }
+
+  async getRequisitionLog(systemKey, session, requisitionId) {
+    return this.request(systemKey, `PMRequisitionMaster/GetRequisitionLog/${encodeURIComponent(requisitionId)}`, {
+      session
+    });
+  }
+
+  async getRequisitionDeliveryInfo(systemKey, session, requisitionId) {
+    return this.request(systemKey, `PMRequisitionMaster/getDeliveryInfoByReqId/${encodeURIComponent(requisitionId)}`, {
+      session
+    });
   }
 }
 

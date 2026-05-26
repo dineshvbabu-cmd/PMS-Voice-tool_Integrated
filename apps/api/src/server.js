@@ -6,7 +6,7 @@ const { URL } = require("url");
 const { createSettings } = require("./lib/settings");
 const { pmsRoutes, purchaseRouteGroups, liveEndpoints, samplePrompts } = require("./lib/inventory");
 const { PMSLinkClient } = require("./lib/pmslink-client");
-const { executeCopilotQuery } = require("./lib/copilot");
+const { executeCopilotQuery, confirmCopilotAction } = require("./lib/copilot");
 
 const PORT = Number(process.env.PORT || 3100);
 const settings = createSettings();
@@ -351,6 +351,30 @@ const server = http.createServer(async (req, res) => {
         session: browserSession?.systems?.[systemKey] || null,
         query: body.query || "",
         systemKey
+      });
+
+      sendJson(req, res, 200, result);
+      return;
+    }
+
+    if (req.method === "POST" && parsedUrl.pathname === "/api/copilot/confirm") {
+      const rawBody = await readBody(req);
+      const body = rawBody ? JSON.parse(rawBody) : {};
+      const systemKey = body.systemKey === "purchase" ? "purchase" : "pms";
+      const systemSession = browserSession?.systems?.[systemKey];
+
+      if (!systemSession) {
+        sendJson(req, res, 401, { ok: false, message: "Login required" });
+        return;
+      }
+
+      const result = await confirmCopilotAction({
+        client,
+        session: systemSession,
+        systemKey,
+        action: body.action || "",
+        payload: body.payload || {},
+        jobId: body.jobId || ""
       });
 
       sendJson(req, res, 200, result);
