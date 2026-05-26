@@ -51,6 +51,27 @@ function findRequisitionId(text) {
   );
 }
 
+function findInventoryItemId(text) {
+  return (
+    findNumberLike(text, /inventory\s+item(?:\s+id)?\s*[:#-]?\s*(\d+)/i) ||
+    findNumberLike(text, /component\s+item(?:\s+id)?\s*[:#-]?\s*(\d+)/i)
+  );
+}
+
+function findVesselKeyword(text) {
+  return (
+    firstMatch(text, /(?:on|for|in)\s+vessel\s+([a-z0-9][a-z0-9 .&()/-]{1,80}?)(?:\s+(?:workflow|with|for|due|overdue|because|status)\b|[?.!,]|$)/i) ||
+    firstMatch(text, /vessel\s+([a-z0-9][a-z0-9 .&()/-]{1,80}?)(?:\s+(?:workflow|with|for|due|overdue|because|status)\b|[?.!,]|$)/i)
+  );
+}
+
+function normalizeInventoryKeyword(value) {
+  return String(value || "")
+    .replace(/\b(spare|spares|store|stores|inventory|inventories|item|items|material|materials|catalog|list|show|find|search|create|requisition|request)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function findDescription(text) {
   return (
     firstMatch(text, /(?:description|remarks?|notes?)\s*[:\-]?\s*(.+)$/i) ||
@@ -311,12 +332,13 @@ async function routeWithOpenAI(query, systemKey) {
           content: [
             "You route Mazik PMS and Mazik Purchase operational requests.",
             "Return strict JSON with keys action, normalizedEnglish, params, explanation.",
-            "Supported actions are maintenance_list, maintenance_detail, defects_list, certificates_list, requisitions_list, purchase_orders_list, requisition_detail, close_job, postponement, requisition_create, help.",
+            "Supported actions are maintenance_list, maintenance_detail, defects_list, certificates_list, requisitions_list, purchase_orders_list, requisition_detail, inventory_items, close_job, postponement, requisition_create, help.",
             "For list requests, extract filters such as overdue, due, critical, nonCritical, significant, open, closed, completed, statusText, dueWindowDays, and keyword.",
             "Map natural operator wording like jobs, work orders, PM jobs, requisitions, PRs, RFQs, POs, material receipts, invoices, certificates, surveys, expiring, coming due, and blocked by spares.",
+            "For inventory_items params, use vesselKeyword, keyword, and requisitionMode.",
             "For close_job params, use jobId, completionDate, closureDescription, maintenanceCauseId, overdueRemarks, currentCounterValue.",
             "For postponement params, use jobId, postponeMode, postponeDate, postponeFrequency, postponeReasonId, remarks, approvedBy, currentDueDate.",
-            "For requisition_create params, prefer requisitionPayload when the user provides structured JSON.",
+            "For requisition_create params, prefer requisitionPayload when the user provides structured JSON. Otherwise use vesselKeyword, keyword, requisitionMode, inventoryItemId, inventoryItemName, inventoryItemType, inventoryItemPath, inventoryAccountCode, description, and workflow.",
             `The active system is ${systemKey === "purchase" ? "Purchase Link" : "PMS Link"}.`
           ].join(" ")
         },
@@ -340,12 +362,20 @@ function routeLocally(query) {
   const text = normalize(query);
   const jobId = findJobReference(query);
   const requisitionId = findRequisitionId(query);
+  const inventoryItemId = findInventoryItemId(query);
   const date = findDate(query);
   const description = findDescription(query);
-  const keyword = findKeyword(query) || description || "";
+  const vesselKeyword = findVesselKeyword(query) || "";
+  const rawKeyword = findKeyword(query) || description || "";
+  const keyword =
+    rawKeyword && vesselKeyword && normalizeLoose(rawKeyword) === normalizeLoose(vesselKeyword) ? "" : rawKeyword;
   const dueWindowDays = findDueWindowDays(query);
   const statusText = findStatusText(query);
   const requisitionPayload = parseEmbeddedJson(query);
+  const requisitionMode = findRequisitionMode(query);
+  const inventorySignals = containsAny(text, ["inventory", "spare", "spares", "store", "stores", "material", "materials", "catalog"]);
+  const normalizedInventoryKeyword = normalizeInventoryKeyword(keyword);
+  const effectiveInventoryKeyword = inventorySignals ? normalizedInventoryKeyword : keyword;
   const maintenanceSignals = containsAny(text, [
     "maintenance",
     "maintenances",
@@ -516,11 +546,26 @@ function routeLocally(query) {
       params: {
         linkedJobId: jobId,
         vesselId: findNumberLike(query, /vessel\s*(?:id)?\s*[:#-]?\s*(\d+)/i),
+        vesselKeyword,
         workflow: findNumberLike(query, /workflow\s*(?:id)?\s*[:#-]?\s*(\d+)/i),
         title: description || "Requisition generated from copilot request",
         description,
         requisitionPayload,
-        keyword
+        keyword: effectiveInventoryKeyword || keyword,
+        requisitionMode,
+        inventoryItemId
+      }
+    };
+  }
+
+  if (inventorySignals && (text.includes("list") || text.includes("show") || text.includes("find") || text.includes("search"))) {
+    return {
+      action: "inventory_items",
+      normalizedEnglish: query,
+      params: {
+        vesselKeyword,
+        keyword: effectiveInventoryKeyword,
+        requisitionMode
       }
     };
   }
@@ -614,6 +659,21 @@ function routeLocally(query) {
   }
 
   if (requisitionSignals) {
+    if (!requisitionPayload) {
+      return {
+        action: "requisition_create",
+        normalizedEnglish: query,
+        params: {
+          vesselKeyword,
+          keyword: effectiveInventoryKeyword || keyword,
+          requisitionMode,
+          inventoryItemId,
+          description,
+          workflow: findNumberLike(query, /workflow\s*(?:id)?\s*[:#-]?\s*(\d+)/i)
+        }
+      };
+    }
+
     return {
       action: "requisitions_list",
       normalizedEnglish: query,
@@ -703,6 +763,7 @@ function reconcileRoute(query, aiRoute, localRoute) {
   const defectSignals = containsAny(text, ["defect", "deficiency"]);
   const certificateSignals = containsAny(text, ["certificate", "survey", "expiry", "expiring"]);
   const requisitionSignals = containsAny(text, ["requisition", "purchase request", "rfq", "inquiry"]);
+  const inventorySignals = containsAny(text, ["inventory", "spare", "spares", "store", "stores", "material"]);
   const purchaseSignals =
     !requisitionSignals &&
     containsAny(text, ["purchase order", "po ", "po status", "material receipt", "invoice", "goods receipt", "procurement"]);
@@ -720,6 +781,10 @@ function reconcileRoute(query, aiRoute, localRoute) {
   }
 
   if (purchaseSignals && ai.action !== "purchase_orders_list") {
+    return local;
+  }
+
+  if (inventorySignals && !["inventory_items", "requisition_create", "purchase_orders_list"].includes(String(ai.action || ""))) {
     return local;
   }
 
@@ -742,7 +807,7 @@ function reconcileRoute(query, aiRoute, localRoute) {
 }
 
 function targetSystemForAction(action, fallbackSystemKey) {
-  if (["requisitions_list", "purchase_orders_list", "requisition_detail", "requisition_create"].includes(action)) {
+  if (["requisitions_list", "purchase_orders_list", "requisition_detail", "requisition_create", "inventory_items"].includes(action)) {
     return "purchase";
   }
 
@@ -940,6 +1005,88 @@ async function findCandidateMaintenanceJobs(client, session, params = {}) {
 
   return {
     result,
+    rows
+  };
+}
+
+async function resolveVesselContext(client, session, params = {}) {
+  const vesselsResult = await client.listVessels("purchase", session);
+  const vessels = Array.isArray(unwrapResultData(vesselsResult)) ? unwrapResultData(vesselsResult) : [];
+  const vessel =
+    findById(vessels, params?.vesselId, ["vesselId", "id"]) ||
+    findByKeyword(vessels, params?.vesselKeyword || params?.keyword || "", ["vesselName", "vesselCode"]);
+
+  return {
+    vesselsResult,
+    vessels,
+    vessel
+  };
+}
+
+function flattenComponentTree(nodes, parents = []) {
+  const list = [];
+
+  (nodes || []).forEach((node) => {
+    const currentPath = parents.concat(node?.groupName || []).filter(Boolean);
+    const current = {
+      inventoryItemId: node?.groupId,
+      itemName: node?.groupName || "",
+      itemType: node?.groupType || node?.type || "",
+      accountCode: firstNonEmpty(node?.componentAccountCode, node?.groupAccountCode),
+      itemPath: currentPath.join(" / "),
+      raw: node
+    };
+
+    if (current.inventoryItemId && current.itemName) {
+      list.push(current);
+    }
+
+    if (Array.isArray(node?.subGroup) && node.subGroup.length) {
+      list.push(...flattenComponentTree(node.subGroup, currentPath));
+    }
+  });
+
+  return list;
+}
+
+async function findCandidateInventoryItems(client, session, params = {}) {
+  const vesselContext = await resolveVesselContext(client, session, params);
+  if (!vesselContext.vessel) {
+    return {
+      result: vesselContext.vesselsResult,
+      vessel: null,
+      rows: [],
+      availableVessels: (vesselContext.vessels || [])
+        .slice(0, 10)
+        .map((entry) => firstNonEmpty(entry?.vesselName, entry?.vesselCode))
+        .filter(Boolean)
+    };
+  }
+
+  const treeResult = await client.getComponentTemplateTree("purchase", session, vesselContext.vessel.vesselId);
+  const treeData = unwrapResultData(treeResult);
+  const flatRows = treeResult.ok ? flattenComponentTree(Array.isArray(treeData) ? treeData : []) : [];
+  const keyword = normalizeLoose(params?.keyword || params?.description || params?.inventoryItemName || "");
+  const targetInventoryItemId = String(params?.inventoryItemId || "");
+  const rows = flatRows.filter((row) => {
+    if (!targetInventoryItemId && !/component/i.test(String(row.itemType || ""))) {
+      return false;
+    }
+
+    if (targetInventoryItemId && String(row.inventoryItemId || "") !== targetInventoryItemId) {
+      return false;
+    }
+
+    if (keyword && !normalizeLoose(flattenSearchableText(row)).includes(keyword)) {
+      return false;
+    }
+
+    return true;
+  }).slice(0, targetInventoryItemId ? 20 : 200);
+
+  return {
+    result: treeResult,
+    vessel: vesselContext.vessel,
     rows
   };
 }
@@ -1167,6 +1314,10 @@ function buildRequisitionReviewFields(payload, context = {}) {
   const requisition = payload?.Requisition || {};
   return compactFields([
     buildField("Vessel", context.vessel || requisition.vesselName || requisition.vesselId),
+    buildField("Inventory item", context.selectedItemName || context.itemPreview),
+    buildField("Inventory type", context.selectedItemType),
+    buildField("Inventory path", context.selectedItemPath),
+    buildField("Account code", context.selectedItemAccountCode),
     buildField("Description", context.description || requisition.description),
     buildField("Linked job", context.linkedJobId || requisition.linkedJobId),
     buildField("Priority", context.priority || requisition.priorityName || requisition.priorityId),
@@ -1242,6 +1393,42 @@ function buildMaintenanceDetailPresentation(detail) {
       { label: "Operational procedure", value: detail?.operationalProcedure }
     ].filter((field) => field.value)
   };
+}
+
+function buildInventoryPresentation(result, rows, vessel, params = {}) {
+  return buildTablePresentation({
+    title: "Inventory items for requisition",
+    subtitle: `Live Mazik component inventory for ${vessel?.vesselName || "selected vessel"}`,
+    columns: [
+      { key: "vesselName", label: "Vessel" },
+      { key: "itemName", label: "Item" },
+      { key: "itemType", label: "Type" },
+      { key: "itemPath", label: "Path" },
+      { key: "accountCode", label: "Account" }
+    ],
+    rows: rows.map((row) => ({
+      id: String(row.inventoryItemId),
+      vesselName: vessel?.vesselName || "",
+      itemName: row.itemName,
+      itemType: row.itemType,
+      itemPath: row.itemPath,
+      accountCode: row.accountCode || "-",
+      raw: row
+    })),
+    summary: [
+      { label: "Current matches", value: rows.length },
+      { label: "Vessel", value: vessel?.vesselName || "-" },
+      { label: "Search", value: params.keyword || "All items" }
+    ],
+    rowActions: [
+      {
+        label: "Prepare requisition",
+        promptTemplate:
+          'Create requisition for inventory item {{inventoryItemId}} named "{{itemName}}" on vessel {{vesselName}} workflow 1'
+      }
+    ],
+    actionTarget: "inventory"
+  });
 }
 
 function buildDefectPresentation(result, params = {}) {
@@ -1561,17 +1748,44 @@ function buildRequisitionPayload(params) {
   const draftPayload = {
     Requisition: {
       vesselId: params?.vesselId || "",
-      description: params?.description || params?.title || "",
+      description:
+        params?.description ||
+        params?.title ||
+        (params?.inventoryItemName ? `Requisition for ${params.inventoryItemName}` : ""),
       linkedJobId: params?.linkedJobId || ""
     },
     items: [],
-    templateItems: [],
+    templateItems: params?.inventoryItemId
+      ? [
+          {
+            id: params.inventoryItemId,
+            itemId: params.inventoryItemId,
+            itemName: params.inventoryItemName || "",
+            itemType: params.inventoryItemType || "",
+            accountCode: params.inventoryAccountCode || ""
+          }
+        ]
+      : [],
     workflow: String(params?.workflow || "")
   };
 
+  const missingFields = [];
+  if (!draftPayload.Requisition.vesselId) {
+    missingFields.push("vesselId");
+  }
+  if (!draftPayload.Requisition.description) {
+    missingFields.push("description");
+  }
+  if (!draftPayload.templateItems.length && !draftPayload.items.length) {
+    missingFields.push("inventoryItemId");
+  }
+  if (!draftPayload.workflow) {
+    missingFields.push("workflow");
+  }
+
   return {
     payload: draftPayload,
-    missingFields: ["requisitionPayload"]
+    missingFields
   };
 }
 
@@ -1645,6 +1859,11 @@ async function buildRequisitionDraftContext(client, session, params, payload) {
     templateItemCount: String(Array.isArray(payload?.templateItems) ? payload.templateItems.length : 0)
   };
 
+  context.selectedItemName = firstNonEmpty(params?.inventoryItemName, params?.keyword);
+  context.selectedItemType = firstNonEmpty(params?.inventoryItemType, params?.requisitionMode);
+  context.selectedItemPath = firstNonEmpty(params?.inventoryItemPath);
+  context.selectedItemAccountCode = firstNonEmpty(params?.inventoryAccountCode);
+
   const [vesselsResult, preferenceResult, serviceTypeResult] = await Promise.all([
     client.listVessels("purchase", session).catch(() => null),
     client.listPreferenceTypes("purchase", session).catch(() => null),
@@ -1657,7 +1876,7 @@ async function buildRequisitionDraftContext(client, session, params, payload) {
 
   const resolvedVessel =
     findById(vessels, requisition.vesselId, ["vesselId", "id"]) ||
-    findByKeyword(vessels, params?.keyword || params?.description || "", ["vesselName", "vesselCode"]);
+    findByKeyword(vessels, params?.vesselKeyword || params?.keyword || params?.description || "", ["vesselName", "vesselCode"]);
   const resolvedPriority = findById(
     priorities,
     requisition.preferenceTypeId || requisition.priorityId,
@@ -1836,7 +2055,7 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
       normalizedEnglish,
       reply:
         effectiveSystemKey === "purchase"
-          ? "I can list requisitions, PO status, material receipt visibility, show requisition detail, and prepare requisition-create actions."
+          ? "I can list requisitions, PO status, material receipt visibility, search live inventory items for requisitions, show requisition detail, and prepare requisition-create actions."
           : "I can list maintenance, overdue jobs, critical jobs, defects, certificates, and prepare close or postponement actions.",
       result: null,
       presentation: null
@@ -2074,6 +2293,42 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
     };
   }
 
+  if (action === "inventory_items") {
+    if (effectiveSystemKey !== "purchase") {
+      return {
+        intent: "Inventory items",
+        normalizedEnglish,
+        reply: "Inventory-backed requisition item search belongs to Purchase Link. Switch the active system to Purchase Link for this request.",
+        result: null,
+        presentation: null
+      };
+    }
+
+    const search = await findCandidateInventoryItems(client, effectiveSession, routed.params || {});
+    if (!search.vessel) {
+      return {
+        intent: "Inventory items",
+        normalizedEnglish,
+        reply: search.availableVessels?.length
+          ? `Please name the vessel for the requisition inventory search. Available examples: ${search.availableVessels.join(", ")}.`
+          : "Please name the vessel for the requisition inventory search.",
+        result: search.result,
+        presentation: null
+      };
+    }
+
+    return {
+      intent: "Inventory items",
+      normalizedEnglish,
+      reply:
+        search.rows.length > 0
+          ? `${autoRoutedNotice}I found live inventory items matching your search. Select one below to prepare the requisition.`
+          : `${autoRoutedNotice}I could not find a live inventory item matching that search on ${search.vessel.vesselName}. Try a broader component or spare name.`,
+      result: search.result,
+      presentation: buildInventoryPresentation(search.result, search.rows, search.vessel, routed.params || {})
+    };
+  }
+
   if (action === "close_job") {
     if (effectiveSystemKey === "purchase") {
       return {
@@ -2287,6 +2542,68 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
         result: null,
         presentation: null
       };
+    }
+
+    if (!routed.params?.requisitionPayload && (!routed.params?.inventoryItemId || !routed.params?.vesselId)) {
+      const search = await findCandidateInventoryItems(client, effectiveSession, routed.params || {});
+      if (!search.vessel) {
+        return {
+          intent: "Requisition draft",
+          normalizedEnglish,
+          reply: search.availableVessels?.length
+            ? `Please name the vessel for the requisition. Available examples: ${search.availableVessels.join(", ")}.`
+            : "Please name the vessel for the requisition.",
+          result: search.result,
+          presentation: null
+        };
+      }
+
+      if (!search.result.ok) {
+        return buildDraftResult(
+          "Requisition draft",
+          normalizedEnglish,
+          summarizeResult(search.result),
+          routed.params || {},
+          ["inventoryItemId"],
+          buildPayloadPresentation("Requisition draft", summarizeResult(search.result), routed.params || {}, ["inventoryItemId"], "requisition_create")
+        );
+      }
+
+      if (!routed.params?.inventoryItemId) {
+        if (search.rows.length !== 1) {
+          return {
+            intent: "Select inventory item",
+            normalizedEnglish,
+            reply:
+              search.rows.length > 1
+                ? "I found multiple live inventory items matching that requisition request. Select the correct item below to prepare the requisition."
+                : `I could not find a live inventory item matching that request on ${search.vessel.vesselName}. Try a broader spare, store, or component name.`,
+            result: search.result,
+            presentation: buildInventoryPresentation(search.result, search.rows, search.vessel, routed.params || {})
+          };
+        }
+
+        const selectedItem = search.rows[0];
+        routed.params.inventoryItemId = String(selectedItem.inventoryItemId || "");
+        routed.params.inventoryItemName = selectedItem.itemName || "";
+        routed.params.inventoryItemType = selectedItem.itemType || "";
+        routed.params.inventoryItemPath = selectedItem.itemPath || "";
+        routed.params.inventoryAccountCode = selectedItem.accountCode || "";
+        routed.params.vesselId = search.vessel.vesselId;
+        routed.params.vesselKeyword = search.vessel.vesselName;
+      } else if (!routed.params?.vesselId) {
+        const selectedItem = search.rows.find(
+          (entry) => String(entry.inventoryItemId || "") === String(routed.params.inventoryItemId || "")
+        );
+        if (selectedItem) {
+          routed.params.inventoryItemName = routed.params.inventoryItemName || selectedItem.itemName || "";
+          routed.params.inventoryItemType = routed.params.inventoryItemType || selectedItem.itemType || "";
+          routed.params.inventoryItemPath = routed.params.inventoryItemPath || selectedItem.itemPath || "";
+          routed.params.inventoryAccountCode = routed.params.inventoryAccountCode || selectedItem.accountCode || "";
+        }
+        routed.params.vesselId = search.vessel.vesselId;
+        routed.params.vesselKeyword = search.vessel.vesselName;
+      }
     }
 
     const { payload, missingFields } = buildRequisitionPayload(routed.params || {});

@@ -244,6 +244,12 @@ class PMSLinkClient {
     return this.request(systemKey, "ShipMaster/filterCartItemsInfo/0/0", { session });
   }
 
+  async listInventoryCartItems(systemKey, session, itemType, vesselId) {
+    return this.request(systemKey, `ShipMaster/filterCartItemsInfo/${encodeURIComponent(itemType || "0")}/${encodeURIComponent(vesselId || 0)}`, {
+      session
+    });
+  }
+
   async getDisplayCartItems(systemKey, session, ids, vesselId) {
     return this.request(systemKey, "PMRequisitionMaster/getDisplayCartItems", {
       session,
@@ -251,6 +257,21 @@ class PMSLinkClient {
         Ids: Array.isArray(ids) ? ids.join(",") : String(ids || ""),
         VesselId: vesselId || 0
       }
+    });
+  }
+
+  async getDisplayComponentItems(systemKey, session, ids) {
+    return this.request(systemKey, "PMRequisitionMaster/getDisplayComponentItems", {
+      session,
+      query: {
+        Ids: Array.isArray(ids) ? ids.join(",") : String(ids || "")
+      }
+    });
+  }
+
+  async getComponentTemplateTree(systemKey, session, vesselId) {
+    return this.request(systemKey, `PMRequisitionMaster/componentTemplateTreeBySP/${encodeURIComponent(vesselId || 0)}`, {
+      session
     });
   }
 
