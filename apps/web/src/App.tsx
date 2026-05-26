@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, ExternalLink, KeyRound, ListFilter, LoaderCircle, Send, ShieldCheck, Sparkles } from "lucide-react";
+import { CheckCircle2, ExternalLink, KeyRound, ListFilter, LoaderCircle, Mic, Send, ShieldCheck, Sparkles } from "lucide-react";
 
 type SystemKey = "pms" | "purchase";
 
@@ -98,6 +98,17 @@ type QueryResponse = {
   presentation: Presentation;
 };
 
+type BrowserSpeechRecognition = {
+  start: () => void;
+  stop: () => void;
+  onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+  onerror: (() => void) | null;
+  onend: (() => void) | null;
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+};
+
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") || "http://localhost:3100";
 const SESSION_STORAGE_KEY = "atlas_voiceops_session_id";
 
@@ -179,6 +190,9 @@ function App() {
   const [showPromptLibrary, setShowPromptLibrary] = useState(false);
   const [authForm, setAuthForm] = useState({ username: "", password: "" });
   const [commandOutput, setCommandOutput] = useState<QueryResponse | null>(null);
+  const [voiceSupported, setVoiceSupported] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
 
   const bootstrapQuery = useQuery({
     queryKey: ["bootstrap"],
@@ -271,6 +285,65 @@ function App() {
     queryMutation.mutate(prompt);
   };
 
+  useEffect(() => {
+    const SpeechRecognitionCtor =
+      typeof window !== "undefined"
+        ? (window as unknown as {
+            SpeechRecognition?: new () => BrowserSpeechRecognition;
+            webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
+          }).SpeechRecognition ||
+          (window as unknown as {
+            webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
+          }).webkitSpeechRecognition
+        : undefined;
+
+    if (!SpeechRecognitionCtor) {
+      setVoiceSupported(false);
+      recognitionRef.current = null;
+      return;
+    }
+    const recognition = new SpeechRecognitionCtor();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = "en-US";
+    recognition.onresult = (event) => {
+      const transcript = event.results?.[0]?.[0]?.transcript?.trim() || "";
+      if (transcript) {
+        setQueryInput(transcript);
+        queryMutation.mutate(transcript);
+      }
+    };
+    recognition.onerror = () => {
+      setIsListening(false);
+    };
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    recognitionRef.current = recognition;
+    setVoiceSupported(true);
+
+    return () => {
+      recognition.stop();
+      recognitionRef.current = null;
+    };
+  }, []);
+
+  const toggleVoice = () => {
+    if (!recognitionRef.current) {
+      return;
+    }
+
+    if (isListening) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+      return;
+    }
+
+    setIsListening(true);
+    recognitionRef.current.start();
+  };
+
   return (
     <div className="compact-shell">
       <section className="section-card login-section">
@@ -361,7 +434,12 @@ function App() {
           </div>
           <div>
             <strong>{commandOutput?.intent || "Ready for a live query"}</strong>
-            <p>{commandOutput?.reply || "Ask for maintenances, defects, certificates, requisitions, PO status, or a write action to prepare."}</p>
+            <p>
+              {isListening
+                ? "Listening for your voice command."
+                : commandOutput?.reply ||
+                  "Ask for maintenances, defects, certificates, requisitions, PO status, or a write action to prepare."}
+            </p>
           </div>
         </div>
 
@@ -383,6 +461,14 @@ function App() {
           >
             <Send size={16} />
             {queryMutation.isPending ? "Running" : "Run"}
+          </button>
+          <button
+            className={`secondary-button ${isListening ? "voice-active" : ""}`}
+            onClick={toggleVoice}
+            disabled={!voiceSupported}
+          >
+            <Mic size={16} />
+            {isListening ? "Stop voice" : voiceSupported ? "Voice command" : "Voice unavailable"}
           </button>
           {pendingAction ? (
             <button
@@ -414,6 +500,10 @@ function App() {
           <div>
             <span>Write confirmation</span>
             <strong>{pendingAction ? "Required" : "Not pending"}</strong>
+          </div>
+          <div>
+            <span>Voice</span>
+            <strong>{voiceSupported ? (isListening ? "Listening" : "Ready") : "Browser support required"}</strong>
           </div>
         </div>
       </section>

@@ -229,6 +229,11 @@ pre {
   font-weight: 700;
 }
 
+.voice-active {
+  border-color: rgba(103, 216, 255, 0.5);
+  box-shadow: inset 0 0 0 1px rgba(103, 216, 255, 0.18);
+}
+
 .session-box,
 .assistant-banner,
 .console-meta,

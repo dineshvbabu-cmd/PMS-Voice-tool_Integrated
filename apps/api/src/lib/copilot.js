@@ -354,15 +354,75 @@ function routeLocally(query) {
 }
 
 async function routePrompt(query, systemKey) {
-  if (!OPENAI_API_KEY) {
-    return routeLocally(query);
+  const localRoute = routeLocally(query);
+  try {
+    if (!OPENAI_API_KEY) {
+      return localRoute;
+    }
+
+    const aiRoute = await routeWithOpenAI(query, systemKey);
+    return reconcileRoute(query, aiRoute, localRoute);
+  } catch {
+    return localRoute;
+  }
+}
+
+function reconcileRoute(query, aiRoute, localRoute) {
+  const text = normalize(query);
+  const ai = aiRoute && typeof aiRoute === "object" ? aiRoute : {};
+  const local = localRoute && typeof localRoute === "object" ? localRoute : {};
+
+  const maintenanceSignals =
+    text.includes("maintenance") ||
+    text.includes("work order") ||
+    text.includes("workorder") ||
+    text.includes("job") ||
+    /\bwo[-\s]?\d+/i.test(query) ||
+    (text.includes("overdue") && !text.includes("defect") && !text.includes("certificate") && !text.includes("requisition"));
+
+  const defectSignals = text.includes("defect");
+  const certificateSignals = text.includes("certificate") || text.includes("survey");
+  const requisitionSignals = text.includes("requisition");
+  const purchaseSignals =
+    !requisitionSignals &&
+    (text.includes("purchase order") ||
+      text.includes("po ") ||
+      text.includes("po status") ||
+      text.includes("material receipt") ||
+      text.includes("invoice"));
+
+  if (defectSignals && ai.action !== "defects_list") {
+    return local;
   }
 
-  try {
-    return await routeWithOpenAI(query, systemKey);
-  } catch {
-    return routeLocally(query);
+  if (certificateSignals && ai.action !== "certificates_list") {
+    return local;
   }
+
+  if (requisitionSignals && !String(ai.action || "").startsWith("requisition")) {
+    return local;
+  }
+
+  if (purchaseSignals && ai.action !== "purchase_orders_list") {
+    return local;
+  }
+
+  if (maintenanceSignals) {
+    const allowed = new Set(["maintenance_list", "maintenance_detail", "close_job", "postponement"]);
+    if (!allowed.has(String(ai.action || ""))) {
+      return local;
+    }
+  }
+
+  return {
+    ...local,
+    ...ai,
+    params: {
+      ...(local.params || {}),
+      ...(ai.params || {})
+    },
+    normalizedEnglish: ai.normalizedEnglish || local.normalizedEnglish || query
+  };
 }
 
 function summarizeResult(result) {
