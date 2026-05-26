@@ -7,6 +7,14 @@ function normalize(text) {
   return String(text || "").toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+function normalizeLoose(text) {
+  return String(text || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function containsAny(text, phrases) {
   return (phrases || []).some((phrase) => normalize(text).includes(normalize(phrase)));
 }
@@ -52,7 +60,7 @@ function findDescription(text) {
 
 function cleanKeyword(value) {
   return String(value || "")
-    .replace(/\b(in the next|next|coming due|overdue|due|status|with|for|on|and|show|list|find|track|please)\b.*$/i, "")
+    .replace(/\b(in the next|next|coming due|overdue|due|status|with|for|on|and|show|list|find|track|please|all|open|closed|critical|non critical|non-critical|detail|details)\b.*$/i, "")
     .replace(/^[^a-z0-9]+|[^a-z0-9]+$/gi, "")
     .trim();
 }
@@ -143,6 +151,20 @@ function findStatusText(text) {
   return statuses.find((status) => normalized.includes(status)) || "";
 }
 
+function findPriorityHint(text) {
+  const normalized = normalize(text);
+
+  if (containsAny(normalized, ["critical", "high priority", "urgent"])) {
+    return "critical";
+  }
+
+  if (containsAny(normalized, ["normal priority", "routine", "non critical", "non-critical"])) {
+    return "normal";
+  }
+
+  return "";
+}
+
 function parseEmbeddedJson(text) {
   const fenced = String(text || "").match(/```(?:json)?\s*([\s\S]*?)```/i);
   const candidates = [];
@@ -180,6 +202,56 @@ function formatDate(value) {
   }
 
   return date.toISOString().slice(0, 10);
+}
+
+function toDisplayText(value) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((entry) => toDisplayText(entry)).filter(Boolean).join(", ");
+  }
+
+  if (typeof value === "object") {
+    return "";
+  }
+
+  const text = String(value).trim();
+  if (!text || text === "null" || text === "undefined") {
+    return "";
+  }
+
+  return text;
+}
+
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    const text = toDisplayText(value);
+    if (text) {
+      return text;
+    }
+  }
+
+  return "";
+}
+
+function flattenSearchableText(value) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((entry) => flattenSearchableText(entry)).join(" ");
+  }
+
+  if (typeof value === "object") {
+    return Object.values(value)
+      .map((entry) => flattenSearchableText(entry))
+      .join(" ");
+  }
+
+  return String(value);
 }
 
 function currentDateOnly() {
@@ -271,6 +343,8 @@ function routeLocally(query) {
   const certificateSignals = containsAny(text, [
     "certificate",
     "certificates",
+    "cert ",
+    "certs",
     "survey",
     "surveys",
     "expiring certificate",
@@ -282,6 +356,8 @@ function routeLocally(query) {
     "requisitions",
     "purchase request",
     "purchase requests",
+    "request",
+    "requests",
     "pr ",
     "rfq",
     "inquiry"
@@ -293,11 +369,16 @@ function routeLocally(query) {
       "purchase orders",
       "po ",
       "po status",
+      "spare",
+      "spares",
+      "material",
       "material receipt",
       "material receipts",
       "goods receipt",
       "invoice",
       "invoices",
+      "follow up",
+      "follow-up",
       "vendor follow up",
       "procurement"
     ]);
@@ -360,7 +441,13 @@ function routeLocally(query) {
     };
   }
 
-  if (text.includes("create requisition") || text.includes("raise requisition") || text.includes("raise purchase")) {
+  if (
+    text.includes("create requisition") ||
+    text.includes("raise requisition") ||
+    text.includes("raise purchase") ||
+    text.includes("create request") ||
+    text.includes("raise request")
+  ) {
     return {
       action: "requisition_create",
       normalizedEnglish: query,
@@ -370,7 +457,8 @@ function routeLocally(query) {
         workflow: findNumberLike(query, /workflow\s*(?:id)?\s*[:#-]?\s*(\d+)/i),
         title: description || "Requisition generated from copilot request",
         description,
-        requisitionPayload
+        requisitionPayload,
+        keyword
       }
     };
   }
@@ -418,7 +506,8 @@ function routeLocally(query) {
       params: {
         type,
         certType,
-        keyword
+        keyword,
+        priorityHint: findPriorityHint(query)
       }
     };
   }
@@ -456,7 +545,8 @@ function routeLocally(query) {
         significant,
         dueStatus,
         defectStatus,
-        keyword
+        keyword,
+        priorityHint: findPriorityHint(query)
       }
     };
   }
@@ -467,7 +557,8 @@ function routeLocally(query) {
       normalizedEnglish: query,
       params: {
         statusText,
-        keyword
+        keyword,
+        priorityHint: findPriorityHint(query)
       }
     };
   }
@@ -478,7 +569,8 @@ function routeLocally(query) {
       normalizedEnglish: query,
       params: {
         statusText,
-        keyword
+        keyword,
+        priorityHint: findPriorityHint(query)
       }
     };
   }
@@ -502,11 +594,15 @@ function routeLocally(query) {
       normalizedEnglish: query,
       params: {
         overdueOnly: text.includes("overdue"),
-        dueOnly: containsAny(text, ["coming due", "due soon", "due", "next week", "next month", "this week", "this month", "tomorrow"]),
+        dueOnly:
+          !text.includes("overdue") &&
+          (containsAny(text, ["coming due", "due soon", "next week", "next month", "this week", "this month", "tomorrow"]) ||
+            /\bdue\b/.test(text)),
         criticalOnly: text.includes("critical") && !text.includes("non critical"),
         nonCriticalOnly: containsAny(text, ["non critical", "non-critical", "normal jobs", "routine jobs"]),
         keyword,
-        dueWindowDays
+        dueWindowDays,
+        priorityHint: findPriorityHint(query)
       }
     };
   }
@@ -811,8 +907,29 @@ function applyMaintenanceFilters(rows, params = {}) {
       }
     }
 
+    if (params.keyword) {
+      const haystack = normalizeLoose(
+        [row.vesselName, row.jobName, row.shipComponentName, row.jobCode, row.userPosition]
+          .filter(Boolean)
+          .join(" ")
+      );
+
+      if (!haystack.includes(normalizeLoose(params.keyword))) {
+        return false;
+      }
+    }
+
     return true;
   });
+}
+
+function applyGenericKeywordFilter(rows, keyword) {
+  if (!keyword) {
+    return rows || [];
+  }
+
+  const target = normalizeLoose(keyword);
+  return (rows || []).filter((row) => normalizeLoose(flattenSearchableText(row)).includes(target));
 }
 
 function applyPurchaseStatusFilter(rows, statusText) {
@@ -820,8 +937,22 @@ function applyPurchaseStatusFilter(rows, statusText) {
     return rows || [];
   }
 
-  const target = normalize(statusText);
-  return (rows || []).filter((row) => normalize(row.currentStatus).includes(target));
+  const target = normalizeLoose(statusText);
+  return (rows || []).filter((row) =>
+    normalizeLoose(
+      [
+        row.currentStatus,
+        row.invoiceStatus,
+        row.matDeliveryDate,
+        row.materialReceipt,
+        row.poNumber,
+        row.requisitionNumber,
+        row.suppllier
+      ]
+        .filter(Boolean)
+        .join(" ")
+    ).includes(target)
+  );
 }
 
 function buildTablePresentation({
@@ -892,7 +1023,7 @@ function buildMaintenancePresentation(result, params = {}) {
       { label: "Critical overdue", value: result.body?.criticalOverdue ?? 0 }
     ],
     rowActions: [
-      { label: "Read detail", promptTemplate: "Read the maintenance detail for ship component job link {{shipComponentJobLinkId}}" },
+      { label: "Show detail", promptTemplate: "Show maintenance detail for ship component job link {{shipComponentJobLinkId}}" },
       { label: "Close job", promptTemplate: "Close ship component job link {{shipComponentJobLinkId}} completed on {{today}} with remarks work completed satisfactorily" },
       { label: "Postpone", promptTemplate: "Postpone ship component job link {{shipComponentJobLinkId}} until {{plus30}} with reason 5, approver 152, and remarks awaiting spare parts" }
     ],
@@ -919,9 +1050,9 @@ function buildMaintenanceDetailPresentation(detail) {
   };
 }
 
-function buildDefectPresentation(result) {
+function buildDefectPresentation(result, params = {}) {
   const totals = result.body?.total || {};
-  const rows = Array.isArray(result.body?.data) ? result.body.data : [];
+  const rows = applyGenericKeywordFilter(Array.isArray(result.body?.data) ? result.body.data : [], params.keyword);
 
   return buildTablePresentation({
     title: "Defects",
@@ -961,7 +1092,7 @@ function buildDefectPresentation(result) {
 }
 
 function buildCertificatePresentation(result, params = {}) {
-  const rows = Array.isArray(result.body?.data) ? result.body.data : [];
+  const rows = applyGenericKeywordFilter(Array.isArray(result.body?.data) ? result.body.data : [], params.keyword);
   return buildTablePresentation({
     title: "Certificates and surveys",
     subtitle: `Live certificate explorer from Mazik${params?.type ? `, view: ${params.type}` : ""}`,
@@ -994,8 +1125,8 @@ function buildCertificatePresentation(result, params = {}) {
   });
 }
 
-function buildRequisitionListPresentation(result) {
-  const rows = Array.isArray(result.body?.data) ? result.body.data : [];
+function buildRequisitionListPresentation(result, params = {}) {
+  const rows = applyGenericKeywordFilter(Array.isArray(result.body?.data) ? result.body.data : [], params.keyword);
   return buildTablePresentation({
     title: "Requisitions",
     subtitle: "Live Purchase Link requisition tracking",
@@ -1031,8 +1162,8 @@ function buildRequisitionListPresentation(result) {
   });
 }
 
-function buildPurchaseOrderPresentation(result) {
-  const rows = Array.isArray(result.body?.data) ? result.body.data : [];
+function buildPurchaseOrderPresentation(result, params = {}) {
+  const rows = applyGenericKeywordFilter(Array.isArray(result.body?.data) ? result.body.data : [], params.keyword);
   return buildTablePresentation({
     title: "Purchase orders and material receipt status",
     subtitle: "Live Purchase Link PO tracking",
@@ -1062,28 +1193,45 @@ function buildPurchaseOrderPresentation(result) {
       { label: "Total pages", value: result.body?.totalPages ?? "-" }
     ],
     rowActions: [
-      { label: "Show requisition", promptTemplate: "Show requisition {{requisitionId}} detail with workflow log and delivery info" }
+      { label: "Show detail", promptTemplate: "Show requisition {{requisitionId}} detail with workflow log and delivery info" }
     ],
     actionTarget: "purchaseOrders"
   });
 }
 
+function firstRecord(value) {
+  if (Array.isArray(value)) {
+    return value[0] || null;
+  }
+
+  if (value && typeof value === "object") {
+    return value;
+  }
+
+  return null;
+}
+
 function buildRequisitionDetailPresentation(detail, workflow, delivery) {
+  const deliveryRecord = firstRecord(delivery);
+
   return {
     type: "detail",
     title: "Requisition detail",
     subtitle: detail?.documentHeader || `Requisition ${detail?.requisitionId || ""}`.trim(),
     fields: [
-      { label: "Vessel", value: detail?.vessel?.vesselName },
-      { label: "Origin", value: detail?.originSite },
-      { label: "Type", value: detail?.pmOrderType?.orderTypes },
-      { label: "Priority", value: detail?.pmPreference?.description },
-      { label: "Department", value: detail?.departments?.departmentName },
-      { label: "Status", value: detail?.approvedReq },
-      { label: "Description", value: detail?.descriptionData },
-      { label: "Order reference", value: detail?.orderReferenceNames },
-      { label: "Target date", value: formatDate(detail?.targetDate) },
-      { label: "Delivery info", value: delivery ? JSON.stringify(delivery) : "" },
+      { label: "Vessel", value: firstNonEmpty(detail?.vessel?.vesselName, detail?.vesselName) },
+      { label: "Origin", value: firstNonEmpty(detail?.originSite, detail?.officeRecord?.officeName) },
+      { label: "Type", value: firstNonEmpty(detail?.pmOrderType?.orderTypes, detail?.pmOrderType?.description) },
+      { label: "Priority", value: firstNonEmpty(detail?.pmPreference?.description, detail?.priority, detail?.priorityName) },
+      { label: "Department", value: firstNonEmpty(detail?.departments?.departmentName, detail?.departmentName) },
+      { label: "Status", value: firstNonEmpty(detail?.approvedReq, detail?.currentStatus) },
+      { label: "Description", value: firstNonEmpty(detail?.descriptionData, detail?.description) },
+      { label: "Order reference", value: firstNonEmpty(detail?.orderReferenceNames, detail?.orderRef) },
+      { label: "Target date", value: formatDate(detail?.targetDate || deliveryRecord?.expectedDeliveryDate) },
+      { label: "Expected delivery port", value: firstNonEmpty(deliveryRecord?.expectedDeliveryPort, detail?.expectedDeliveryPort) },
+      { label: "Expected delivery date", value: formatDate(deliveryRecord?.expectedDeliveryDate || detail?.expectedDeliveryDate) },
+      { label: "Vessel ETA", value: formatDate(deliveryRecord?.vesselETA || detail?.vesselETA) },
+      { label: "Vessel ETB", value: formatDate(deliveryRecord?.vesselETB || detail?.vesselETB) },
       { label: "Workflow entries", value: Array.isArray(workflow) ? String(workflow.length) : "" }
     ].filter((field) => field.value)
   };
@@ -1431,7 +1579,7 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
       normalizedEnglish,
       reply: `${autoRoutedNotice}${summarizeResult(result)}`.trim(),
       result,
-      presentation: result.ok ? buildDefectPresentation(result) : null
+      presentation: result.ok ? buildDefectPresentation(result, routed.params || {}) : null
     };
   }
 
@@ -1481,7 +1629,7 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
       normalizedEnglish,
       reply: `${autoRoutedNotice}${summarizeResult(result)}`.trim(),
       result,
-      presentation: result.ok ? buildRequisitionListPresentation(result) : null
+      presentation: result.ok ? buildRequisitionListPresentation(result, routed.params || {}) : null
     };
   }
 
@@ -1510,7 +1658,7 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
       normalizedEnglish,
       reply: `${autoRoutedNotice}${summarizeResult(result)}`.trim(),
       result,
-      presentation: result.ok ? buildPurchaseOrderPresentation(result) : null
+      presentation: result.ok ? buildPurchaseOrderPresentation(result, routed.params || {}) : null
     };
   }
 
