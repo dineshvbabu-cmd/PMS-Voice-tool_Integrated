@@ -112,7 +112,9 @@ async function transcribeVoiceToEnglish(audioBuffer, mimeType) {
     ].join(" ")
   );
 
-  const response = await fetch("https://api.openai.com/v1/audio/translations", {
+  const endpoint = new URL("audio/transcriptions", settings.openAiApiBase.endsWith("/") ? settings.openAiApiBase : `${settings.openAiApiBase}/`).toString();
+
+  const response = await fetch(endpoint, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${process.env.OPENAI_API_KEY}`
@@ -134,7 +136,8 @@ async function transcribeVoiceToEnglish(audioBuffer, mimeType) {
 
   return {
     transcript: String(parsed.text || "").trim(),
-    model: settings.openAiTranscribeModel
+    model: settings.openAiTranscribeModel,
+    endpoint
   };
 }
 
@@ -448,7 +451,8 @@ const server = http.createServer(async (req, res) => {
         transcript: transcription.transcript,
         provider: "openai",
         model: transcription.model,
-        mode: "translate-to-english"
+        mode: "transcribe",
+        endpoint: transcription.endpoint
       });
       return;
     }

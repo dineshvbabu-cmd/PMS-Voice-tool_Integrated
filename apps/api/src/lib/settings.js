@@ -27,6 +27,7 @@ function createSettings() {
       process.env.PURCHASELINK_REQUISITION_PATH || "PMRequisitionMaster/addRequisitionMaster",
     purchaseFollowupPath:
       process.env.PURCHASELINK_FOLLOWUP_PATH || "PMRequisitionMaster/purchaseTracksLists",
+    openAiApiBase: process.env.OPENAI_API_BASE || "https://api.openai.com/v1",
     openAiLanguageModel: process.env.OPENAI_LANGUAGE_MODEL || "gpt-5.4-mini",
     openAiTranscribeModel: process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-transcribe",
     openAiEnabled: Boolean(process.env.OPENAI_API_KEY),

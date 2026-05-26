@@ -451,6 +451,17 @@ function App() {
     recognitionRef.current.start();
   };
 
+  const fallbackToBrowserVoice = (message: string) => {
+    if (voiceSupported) {
+      setVoiceError(`${message} Falling back to browser voice recognition.`);
+      startBrowserRecognition();
+      return true;
+    }
+
+    setVoiceError(message);
+    return false;
+  };
+
   const startServerRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -503,13 +514,13 @@ function App() {
           const payload = await apiUploadAudio(blob);
           const transcript = payload.transcript?.trim() || "";
           if (!transcript) {
-            setVoiceError("I could not hear a clear request. Please try again a bit closer to the microphone.");
+            fallbackToBrowserVoice("I could not hear a clear request from the server transcription.");
             return;
           }
 
           submitPrompt(transcript);
         } catch (error) {
-          setVoiceError(error instanceof Error ? error.message : "Voice transcription failed.");
+          fallbackToBrowserVoice(error instanceof Error ? error.message : "Voice transcription failed.");
         } finally {
           setIsTranscribing(false);
         }
@@ -724,7 +735,7 @@ function App() {
                 : hasTypedPrompt
                   ? "Your typed prompt is ready. One tap sends it like a copilot command."
                   : serverVoiceEnabled
-                    ? "Voice capture stays open longer now and uses OpenAI transcription for stronger accent recognition."
+                    ? "Voice capture stays open longer now and uses OpenAI transcription for stronger accent recognition, with browser fallback if needed."
                     : "Use voice for hands-free operation, or type first and tap once to run."}
             </span>
           </div>
