@@ -83,6 +83,10 @@ type PayloadPresentation = {
   detailFields?: Array<{ label: string; value: string }>;
   reviewFields?: Array<{ label: string; value: string }>;
   technicalLabel?: string;
+  showTechnicalPayload?: boolean;
+  detailSectionTitle?: string;
+  reviewSectionTitle?: string;
+  contextSectionTitle?: string;
 };
 
 type Presentation = TablePresentation | DetailPresentation | PayloadPresentation | null;
@@ -922,7 +926,7 @@ function App() {
 
             {presentation.detailFields?.length ? (
               <div className="payload-section">
-                <div className="payload-section-header">Live job detail</div>
+                <div className="payload-section-header">{presentation.detailSectionTitle || "Live job detail"}</div>
                 <div className="detail-grid">
                   {presentation.detailFields.map((field) => (
                     <div key={`${field.label}-${field.value}`} className="detail-card">
@@ -937,7 +941,7 @@ function App() {
             {presentation.reviewFields?.length ? (
               <div className="payload-section">
                 <div className="payload-section-header">
-                  {pendingAction ? "Action ready for confirmation" : "Action details still needed"}
+                  {presentation.reviewSectionTitle || (pendingAction ? "Action ready for confirmation" : "Action details still needed")}
                 </div>
                 <div className="detail-grid">
                   {presentation.reviewFields.map((field) => (
@@ -952,7 +956,7 @@ function App() {
 
             {presentation.context ? (
               <div className="payload-section">
-                <div className="payload-section-header">Additional context</div>
+                <div className="payload-section-header">{presentation.contextSectionTitle || "Additional context"}</div>
                 <div className="detail-grid">
                   {Object.entries(presentation.context).map(([key, value]) => (
                     value ? (
@@ -966,10 +970,12 @@ function App() {
               </div>
             ) : null}
 
-            <details className="technical-details">
-              <summary>{presentation.technicalLabel || "Technical payload"}</summary>
-              <pre className="payload-box">{formatJson(presentation.payload)}</pre>
-            </details>
+            {presentation.showTechnicalPayload !== false ? (
+              <details className="technical-details">
+                <summary>{presentation.technicalLabel || "Technical payload"}</summary>
+                <pre className="payload-box">{formatJson(presentation.payload)}</pre>
+              </details>
+            ) : null}
           </div>
         ) : null}
       </section>

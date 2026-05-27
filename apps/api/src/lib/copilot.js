@@ -1206,7 +1206,11 @@ function buildPayloadPresentation(title, message, payload, missingFields, action
     context,
     detailFields: options.detailFields || [],
     reviewFields: options.reviewFields || [],
-    technicalLabel: options.technicalLabel || "Technical payload"
+    technicalLabel: options.technicalLabel || "Technical payload",
+    showTechnicalPayload: options.showTechnicalPayload !== false,
+    detailSectionTitle: options.detailSectionTitle || "",
+    reviewSectionTitle: options.reviewSectionTitle || "",
+    contextSectionTitle: options.contextSectionTitle || "Additional context"
   };
 }
 
@@ -1314,18 +1318,17 @@ function buildRequisitionReviewFields(payload, context = {}) {
   const requisition = payload?.Requisition || {};
   return compactFields([
     buildField("Vessel", context.vessel || requisition.vesselName || requisition.vesselId),
-    buildField("Inventory item", context.selectedItemName || context.itemPreview),
-    buildField("Inventory type", context.selectedItemType),
-    buildField("Inventory path", context.selectedItemPath),
-    buildField("Account code", context.selectedItemAccountCode),
+    buildField("Request type", context.selectedItemType || context.serviceType || context.requisitionMode),
+    buildField("Selected item", context.selectedItemName || context.itemPreview),
+    buildField("Component path", context.selectedItemPath),
     buildField("Description", context.description || requisition.description),
-    buildField("Linked job", context.linkedJobId || requisition.linkedJobId),
     buildField("Priority", context.priority || requisition.priorityName || requisition.priorityId),
-    buildField("Service type", context.serviceType || requisition.serviceTypeName || requisition.orderTypeId),
     buildField("Workflow", context.workflow || payload?.workflow),
-    buildField("Cart items", context.cartItems || context.itemPreview),
+    buildField("Line items", context.cartItems || context.itemPreview),
+    buildField("Account code", context.selectedItemAccountCode),
     buildField("Item count", context.itemCount),
-    buildField("Template item count", context.templateItemCount)
+    buildField("Template item count", context.templateItemCount),
+    buildField("Linked job", context.linkedJobId || requisition.linkedJobId)
   ]);
 }
 
@@ -1856,7 +1859,8 @@ async function buildRequisitionDraftContext(client, session, params, payload) {
     workflow: String(payload?.workflow || ""),
     linkedJobId: firstNonEmpty(requisition.linkedJobId, params?.linkedJobId),
     itemCount: String(Array.isArray(payload?.items) ? payload.items.length : 0),
-    templateItemCount: String(Array.isArray(payload?.templateItems) ? payload.templateItems.length : 0)
+    templateItemCount: String(Array.isArray(payload?.templateItems) ? payload.templateItems.length : 0),
+    requisitionMode: firstNonEmpty(params?.requisitionMode)
   };
 
   context.selectedItemName = firstNonEmpty(params?.inventoryItemName, params?.keyword);
@@ -2621,10 +2625,11 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
           payload,
           missingFields,
           "requisition_create",
-          draftContext,
+          {},
           {
             reviewFields: buildRequisitionReviewFields(payload, draftContext),
-            technicalLabel: "Technical requisition payload"
+            showTechnicalPayload: false,
+            reviewSectionTitle: "Requisition summary"
           }
         )
       );
@@ -2645,10 +2650,11 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
         payload,
         [],
         "requisition_create",
-        draftContext,
+        {},
         {
           reviewFields: buildRequisitionReviewFields(payload, draftContext),
-          technicalLabel: "Technical requisition payload"
+          showTechnicalPayload: false,
+          reviewSectionTitle: "Requisition summary"
         }
       )
     );
