@@ -1,234 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, ExternalLink, KeyRound, ListFilter, LoaderCircle, Mic, ShieldCheck, Sparkles } from "lucide-react";
-
-type SystemKey = "pms" | "purchase";
-
-type SessionState = {
-  authenticated: boolean;
-  createdAt: string;
-  hasToken: boolean;
-  hasCookies: boolean;
-  lastLoginStatus: number;
-};
-
-type BootstrapResponse = {
-  product: {
-    name: string;
-    subtitle: string;
-  };
-  systems: Record<
-    SystemKey,
-    {
-      name: string;
-      webBaseUrl: string;
-      apiBaseUrl: string;
-      landingUrl: string;
-    }
-  >;
-  settings: {
-    openAiEnabled?: boolean;
-    [key: string]: unknown;
-  };
-  session: Record<SystemKey, SessionState | null>;
-  samplePrompts: string[];
-};
-
-type SummaryItem = {
-  label: string;
-  value: string | number;
-};
-
-type TableColumn = {
-  key: string;
-  label: string;
-};
-
-type TableRow = Record<string, unknown> & {
-  id: string;
-  raw?: Record<string, unknown>;
-};
-
-type RowAction = {
-  label: string;
-  promptTemplate?: string;
-  urlTemplate?: string;
-};
-
-type TablePresentation = {
-  type: "table";
-  title: string;
-  subtitle?: string;
-  columns: TableColumn[];
-  rows: TableRow[];
-  summary?: SummaryItem[];
-  rowActions?: RowAction[];
-};
-
-type DetailPresentation = {
-  type: "detail";
-  title: string;
-  subtitle?: string;
-  fields: Array<{ label: string; value: string }>;
-};
-
-type PayloadPresentation = {
-  type: "payload";
-  title: string;
-  message?: string;
-  payload: unknown;
-  missingFields?: string[];
-  actionName?: string;
-  context?: Record<string, string>;
-  detailFields?: Array<{ label: string; value: string }>;
-  reviewFields?: Array<{ label: string; value: string }>;
-  technicalLabel?: string;
-  showTechnicalPayload?: boolean;
-  detailSectionTitle?: string;
-  reviewSectionTitle?: string;
-  contextSectionTitle?: string;
-};
-
-type Presentation = TablePresentation | DetailPresentation | PayloadPresentation | null;
-
-type QueryResponse = {
-  intent: string;
-  normalizedEnglish: string;
-  reply: string;
-  result: {
-    pendingConfirmation?: boolean;
-    pendingAction?: {
-      action: string;
-      systemKey: SystemKey;
-      jobId?: string;
-      payload: unknown;
-    };
-    [key: string]: unknown;
-  } | null;
-  presentation: Presentation;
-};
-
-type BrowserSpeechRecognition = {
-  start: () => void;
-  stop: () => void;
-  onresult: ((event: { resultIndex?: number; results: ArrayLike<(ArrayLike<{ transcript: string }> & { isFinal?: boolean })> }) => void) | null;
-  onerror: (() => void) | null;
-  onend: (() => void) | null;
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-};
-
-type VoiceTranscriptionResponse = {
-  ok: boolean;
-  transcript: string;
-  provider: string;
-  model: string;
-  mode: string;
-};
-
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") || "http://localhost:3100";
-const SESSION_STORAGE_KEY = "atlas_voiceops_session_id";
-
-function getStoredSessionId() {
-  return window.localStorage.getItem(SESSION_STORAGE_KEY) || "";
-}
-
-function setStoredSessionId(sessionId: string) {
-  if (sessionId) {
-    window.localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
-  } else {
-    window.localStorage.removeItem(SESSION_STORAGE_KEY);
-  }
-}
-
-async function apiFetch<T>(path: string, options: RequestInit = {}) {
-  const headers = new Headers(options.headers || {});
-  const hasBody = options.body !== undefined && options.body !== null;
-
-  if (hasBody) {
-    headers.set("Content-Type", "application/json");
-  }
-
-  const sessionId = getStoredSessionId();
-  if (sessionId) {
-    headers.set("x-session-id", sessionId);
-  }
-
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    headers
-  });
-
-  const payload = (await response.json()) as T & { error?: string; message?: string };
-  if (!response.ok) {
-    throw new Error(payload.error || payload.message || `Request failed with status ${response.status}`);
-  }
-
-  return payload;
-}
-
-async function apiUploadAudio(blob: Blob) {
-  const headers = new Headers();
-  const sessionId = getStoredSessionId();
-  if (sessionId) {
-    headers.set("x-session-id", sessionId);
-  }
-  headers.set("Content-Type", blob.type || "audio/webm");
-  headers.set("x-audio-filename", `voice-${Date.now()}.webm`);
-
-  const response = await fetch(`${API_BASE_URL}/api/voice/transcribe`, {
-    method: "POST",
-    headers,
-    body: blob
-  });
-
-  const payload = (await response.json()) as VoiceTranscriptionResponse & { error?: string; message?: string };
-  if (!response.ok) {
-    throw new Error(payload.error || payload.message || `Voice transcription failed with status ${response.status}`);
-  }
-
-  return payload;
-}
-
-function formatJson(value: unknown) {
-  return JSON.stringify(value, null, 2);
-}
-
-function formatDate(value?: string | null) {
-  if (!value) {
-    return "-";
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return date.toISOString().slice(0, 10);
-}
-
-function formatContextLabel(key: string) {
-  return key
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function interpolateTemplate(template: string, row?: TableRow | null) {
-  const today = new Date();
-  const plus30 = new Date(today);
-  plus30.setDate(plus30.getDate() + 30);
-
-  const source = {
-    ...(row || {}),
-    ...(row?.raw || {}),
-    today: today.toISOString().slice(0, 10),
-    plus30: plus30.toISOString().slice(0, 10)
-  } as Record<string, unknown>;
-
-  return template.replace(/\{\{([^}]+)\}\}/g, (_, key) => String(source[key.trim()] ?? ""));
-}
+import { ExternalLink, KeyRound, ListFilter, LoaderCircle, Mic, ShieldCheck, Sparkles } from "lucide-react";
+import { PresentationRenderer } from "./components/presentation/PresentationRenderer";
+import { AssistantOrb } from "./components/ui/AssistantOrb";
+import { Button } from "./components/ui/Button";
+import { InputField, TextareaField } from "./components/ui/Field";
+import { SectionCard, SectionHeader } from "./components/ui/SectionCard";
+import { LoaderChip, StatusChip } from "./components/ui/StatusChip";
+import { apiFetch, apiUploadAudio } from "./lib/api-client";
+import { interpolateTemplate } from "./lib/formatters";
+import { setStoredSessionId } from "./lib/session-storage";
+import type { BootstrapResponse, BrowserSpeechRecognition, QueryResponse, SystemKey } from "./types/copilot";
 
 function App() {
   const queryClient = useQueryClient();
@@ -607,23 +389,34 @@ function App() {
 
   return (
     <div className="compact-shell">
-      <section className="section-card login-section">
-        <div className="section-head">
-          <div>
-            <p className="eyebrow">Login</p>
-            <h1>{bootstrap?.product.name || "Atlas VoiceOps"}</h1>
-            <p className="subcopy">{bootstrap?.product.subtitle || "Mazik Connector Studio"}</p>
-          </div>
-          <div className={`status-chip ${session?.authenticated ? "online" : "offline"}`}>
-            {session?.authenticated ? "Connected" : "Not connected"}
-          </div>
-        </div>
+      <SectionCard className="login-section">
+        <SectionHeader
+          eyebrow="Login"
+          title={bootstrap?.product.name || "Atlas VoiceOps"}
+          description={bootstrap?.product.subtitle || "Mazik Connector Studio"}
+          titleAs="h1"
+          actions={
+            <StatusChip tone={session?.authenticated ? "online" : "offline"}>
+              {session?.authenticated ? "Connected" : "Not connected"}
+            </StatusChip>
+          }
+        />
 
         <div className="system-toggle">
-          <button className={systemKey === "pms" ? "active" : ""} onClick={() => setSystemKey("pms")}>
+          <button
+            className={systemKey === "pms" ? "active" : ""}
+            onClick={() => setSystemKey("pms")}
+            aria-pressed={systemKey === "pms"}
+            type="button"
+          >
             PMS Link
           </button>
-          <button className={systemKey === "purchase" ? "active" : ""} onClick={() => setSystemKey("purchase")}>
+          <button
+            className={systemKey === "purchase" ? "active" : ""}
+            onClick={() => setSystemKey("purchase")}
+            aria-pressed={systemKey === "purchase"}
+            type="button"
+          >
             Purchase Link
           </button>
         </div>
@@ -635,30 +428,27 @@ function App() {
           </a>
         </div>
 
-        <label className="field">
-          Username
-          <input
-            value={authForm.username}
-            onChange={(event) => setAuthForm((current) => ({ ...current, username: event.target.value }))}
-          />
-        </label>
-        <label className="field">
-          Password
-          <input
-            type="password"
-            value={authForm.password}
-            onChange={(event) => setAuthForm((current) => ({ ...current, password: event.target.value }))}
-          />
-        </label>
+        <InputField
+          label="Username"
+          value={authForm.username}
+          autoComplete="username"
+          onChange={(event) => setAuthForm((current) => ({ ...current, username: event.target.value }))}
+        />
+        <InputField
+          label="Password"
+          type="password"
+          value={authForm.password}
+          autoComplete="current-password"
+          onChange={(event) => setAuthForm((current) => ({ ...current, password: event.target.value }))}
+        />
 
         <div className="button-strip">
-          <button className="primary-button" onClick={() => loginMutation.mutate()} disabled={loginMutation.isPending}>
-            <KeyRound size={16} />
+          <Button variant="primary" icon={<KeyRound size={16} />} onClick={() => loginMutation.mutate()} disabled={loginMutation.isPending}>
             {loginMutation.isPending ? "Logging in" : "Login"}
-          </button>
-          <button className="secondary-button" onClick={() => logoutMutation.mutate()} disabled={logoutMutation.isPending}>
+          </Button>
+          <Button variant="secondary" onClick={() => logoutMutation.mutate()} disabled={logoutMutation.isPending}>
             Logout
-          </button>
+          </Button>
         </div>
 
         <div className="session-box">
@@ -675,21 +465,25 @@ function App() {
             <strong>{bootstrap?.systems[systemKey].apiBaseUrl || "-"}</strong>
           </div>
         </div>
-      </section>
+      </SectionCard>
 
-      <section className="section-card console-section">
-        <div className="section-head">
-          <div>
-            <p className="eyebrow">Command Console</p>
-            <h2>Query Mazik live data or prepare a real action</h2>
-          </div>
-          <button className="ghost-button" onClick={() => setShowPromptLibrary((current) => !current)}>
-            <ListFilter size={16} />
-            {showPromptLibrary ? "Hide prompts" : "Sample prompts"}
-          </button>
-        </div>
+      <SectionCard className="console-section">
+        <SectionHeader
+          eyebrow="Command Console"
+          title="Query Mazik live data or prepare a real action"
+          actions={
+            <Button
+              variant="ghost"
+              icon={<ListFilter size={16} />}
+              onClick={() => setShowPromptLibrary((current) => !current)}
+              aria-expanded={showPromptLibrary}
+            >
+              {showPromptLibrary ? "Hide prompts" : "Sample prompts"}
+            </Button>
+          }
+        />
 
-        <div className="assistant-banner">
+        <div className="assistant-banner" role="status" aria-live="polite">
           <div className="assistant-mark">
             <Sparkles size={18} />
           </div>
@@ -706,27 +500,23 @@ function App() {
           </div>
         </div>
 
-        <label className="field">
-          Prompt
-          <textarea
-            rows={6}
-            value={queryInput}
-            onChange={(event) => setQueryInput(event.target.value)}
-            placeholder="Type a request, or tap the assistant to speak."
-          />
-        </label>
+        <TextareaField
+          label="Prompt"
+          rows={6}
+          value={queryInput}
+          onChange={(event) => setQueryInput(event.target.value)}
+          placeholder="Type a request, or tap the assistant to speak."
+        />
 
         <div className="assistant-dock">
-          <button
-            className={`assistant-orb ${isListening ? "listening" : ""} ${hasTypedPrompt ? "armed" : ""}`}
+          <AssistantOrb
+            isListening={isListening}
+            isArmed={hasTypedPrompt}
             onClick={activateAssistant}
             disabled={(!voiceInputEnabled && !hasTypedPrompt) || queryMutation.isPending || isTranscribing}
-            aria-label={isListening ? "Stop listening" : hasTypedPrompt ? "Send typed request" : "Start voice assistant"}
-          >
-            <span className="assistant-orb-core">
-              {isListening ? <Mic size={22} /> : <Sparkles size={22} />}
-            </span>
-          </button>
+            label={isListening ? "Stop listening" : hasTypedPrompt ? "Send typed request" : "Start voice assistant"}
+            icon={isListening ? <Mic size={22} /> : <Sparkles size={22} />}
+          />
           <div className="assistant-dock-copy">
             <strong>
               {isTranscribing
@@ -754,21 +544,21 @@ function App() {
             </span>
           </div>
           {pendingAction ? (
-            <button
-              className="confirm-button"
+            <Button
+              variant="confirm"
+              icon={<ShieldCheck size={16} />}
               onClick={() => confirmMutation.mutate(pendingAction)}
               disabled={confirmMutation.isPending}
             >
-              <ShieldCheck size={16} />
               {confirmMutation.isPending ? "Submitting" : "Confirm action"}
-            </button>
+            </Button>
           ) : null}
         </div>
 
         {showPromptLibrary ? (
           <div className="prompt-library">
             {samplePrompts.map((prompt) => (
-              <button key={prompt} className="prompt-pill" onClick={() => runPrompt(prompt)}>
+              <button key={prompt} className="prompt-pill" onClick={() => runPrompt(prompt)} type="button">
                 {prompt}
               </button>
             ))}
@@ -799,186 +589,37 @@ function App() {
             </strong>
           </div>
         </div>
-      </section>
+      </SectionCard>
 
-      <section className="section-card results-section">
-        <div className="section-head">
-          <div>
-            <p className="eyebrow">Parsed Result</p>
-            <h2>{presentation?.title || "Live results will appear here"}</h2>
-            <p className="subcopy">{presentation && "subtitle" in presentation ? presentation.subtitle : "Run a prompt to render live Mazik data, payload confirmation, and action context."}</p>
-          </div>
-          {queryMutation.isPending || confirmMutation.isPending ? (
-            <div className="loader-chip">
-              <LoaderCircle size={16} className="spin" />
-              Working
-            </div>
-          ) : null}
-        </div>
+      <SectionCard className="results-section">
+        <SectionHeader
+          eyebrow="Parsed Result"
+          title={presentation?.title || "Live results will appear here"}
+          description={
+            presentation && "subtitle" in presentation
+              ? presentation.subtitle
+              : "Run a prompt to render live Mazik data, payload confirmation, and action context."
+          }
+          actions={
+            queryMutation.isPending || confirmMutation.isPending ? (
+              <LoaderChip>
+                <LoaderCircle size={16} className="spin" />
+                Working
+              </LoaderChip>
+            ) : null
+          }
+        />
 
-        {!presentation ? (
-          <div className="empty-state">
-            <CheckCircle2 size={18} />
-            <span>Try one of the sample prompts to load maintenances, defects, certificates, requisitions, or PO status.</span>
-          </div>
-        ) : null}
-
-        {presentation?.type === "table" ? (
-          <div className="results-layout">
-            <div className="summary-grid">
-              {(presentation.summary || []).map((item) => (
-                <div key={item.label} className="summary-tile">
-                  <span>{item.label}</span>
-                  <strong>{item.value}</strong>
-                </div>
-              ))}
-            </div>
-
-            <div className="table-shell">
-              <div className="table-head">
-                {presentation.columns.map((column) => (
-                  <span key={column.key}>{column.label}</span>
-                ))}
-              </div>
-
-              <div className="table-body">
-                {presentation.rows.map((row) => (
-                  <button
-                    key={row.id}
-                    className={`table-row ${selectedRow?.id === row.id ? "selected" : ""}`}
-                    onClick={() => setSelectedRowId(row.id)}
-                  >
-                    {presentation.columns.map((column) => (
-                      <span key={column.key}>{String(row[column.key] ?? "-")}</span>
-                    ))}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {selectedRow ? (
-              <div className="selected-panel">
-                <div className="selected-head">
-                  <strong>Selected record</strong>
-                  <span>ID {selectedRow.id}</span>
-                </div>
-
-                <div className="selected-grid">
-                  {presentation.columns.map((column) => (
-                    <div key={column.key} className="selected-field">
-                      <span>{column.label}</span>
-                      <strong>{String(selectedRow[column.key] ?? "-")}</strong>
-                    </div>
-                  ))}
-                </div>
-
-                {presentation.rowActions?.length ? (
-                  <div className="row-action-group">
-                    {presentation.rowActions.map((action) =>
-                      action.promptTemplate ? (
-                        <button
-                          key={action.label}
-                          className="secondary-button"
-                          onClick={() => runPrompt(interpolateTemplate(action.promptTemplate || "", selectedRow))}
-                        >
-                          {action.label}
-                        </button>
-                      ) : action.urlTemplate ? (
-                        <a
-                          key={action.label}
-                          className="secondary-link"
-                          href={interpolateTemplate(action.urlTemplate, selectedRow)}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          {action.label}
-                        </a>
-                      ) : null
-                    )}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-
-        {presentation?.type === "detail" ? (
-          <div className="detail-grid">
-            {presentation.fields.map((field) => (
-              <div key={field.label} className="detail-card">
-                <span>{field.label}</span>
-                <strong>{field.value}</strong>
-              </div>
-            ))}
-          </div>
-        ) : null}
-
-        {presentation?.type === "payload" ? (
-          <div className="payload-layout">
-            <div className="payload-banner">
-              <strong>{presentation.message || "Review the parsed payload."}</strong>
-              {presentation.missingFields?.length ? (
-                <span>Missing: {presentation.missingFields.map(formatContextLabel).join(", ")}</span>
-              ) : (
-                <span>Ready for confirmation</span>
-              )}
-            </div>
-
-            {presentation.detailFields?.length ? (
-              <div className="payload-section">
-                <div className="payload-section-header">{presentation.detailSectionTitle || "Live job detail"}</div>
-                <div className="detail-grid">
-                  {presentation.detailFields.map((field) => (
-                    <div key={`${field.label}-${field.value}`} className="detail-card">
-                      <span>{field.label}</span>
-                      <strong>{field.value}</strong>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            {presentation.reviewFields?.length ? (
-              <div className="payload-section">
-                <div className="payload-section-header">
-                  {presentation.reviewSectionTitle || (pendingAction ? "Action ready for confirmation" : "Action details still needed")}
-                </div>
-                <div className="detail-grid">
-                  {presentation.reviewFields.map((field) => (
-                    <div key={`${field.label}-${field.value}`} className="detail-card">
-                      <span>{field.label}</span>
-                      <strong>{field.value}</strong>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            {presentation.context ? (
-              <div className="payload-section">
-                <div className="payload-section-header">{presentation.contextSectionTitle || "Additional context"}</div>
-                <div className="detail-grid">
-                  {Object.entries(presentation.context).map(([key, value]) => (
-                    value ? (
-                      <div key={key} className="detail-card">
-                        <span>{formatContextLabel(key)}</span>
-                        <strong>{value}</strong>
-                      </div>
-                    ) : null
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            {presentation.showTechnicalPayload !== false ? (
-              <details className="technical-details">
-                <summary>{presentation.technicalLabel || "Technical payload"}</summary>
-                <pre className="payload-box">{formatJson(presentation.payload)}</pre>
-              </details>
-            ) : null}
-          </div>
-        ) : null}
-      </section>
+        <PresentationRenderer
+          presentation={presentation}
+          selectedRow={selectedRow}
+          selectedRowId={selectedRowId}
+          hasPendingAction={Boolean(pendingAction)}
+          onSelectRow={setSelectedRowId}
+          onRunPrompt={runPrompt}
+          interpolateTemplate={interpolateTemplate}
+        />
+      </SectionCard>
     </div>
   );
 }

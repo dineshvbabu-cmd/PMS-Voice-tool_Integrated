@@ -47,6 +47,16 @@ button {
   cursor: pointer;
 }
 
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+.table-shell:focus-visible,
+summary:focus-visible {
+  outline: 3px solid rgba(103, 216, 255, 0.58);
+  outline-offset: 3px;
+}
+
 a {
   color: inherit;
   text-decoration: none;
@@ -573,6 +583,12 @@ pre {
   color: var(--muted);
 }
 
+.empty-state strong {
+  display: block;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
 .spin {
   animation: spin 1s linear infinite;
 }
@@ -602,6 +618,17 @@ pre {
   }
   to {
     transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
   }
 }
 

@@ -22,6 +22,7 @@ apps/
   web/   product UI frontend
 docs/
   CLEAN_ARCHITECTURE_REFACTOR.md
+  FRONTEND_UI_SYSTEM.md
   INTEGRATION_NOTES.md
   MAZIK_LIVE_ENDPOINT_INVENTORY.md
   PRODUCTION_EMBEDDED_ASSISTANT_MVP.md
@@ -33,6 +34,10 @@ docs/
 The API has been refactored toward clean architecture boundaries:
 
 - [docs/CLEAN_ARCHITECTURE_REFACTOR.md](docs/CLEAN_ARCHITECTURE_REFACTOR.md)
+
+The frontend now has reusable UI and presentation components:
+
+- [docs/FRONTEND_UI_SYSTEM.md](docs/FRONTEND_UI_SYSTEM.md)
 
 ## Production Embedded Assistant Plan
 
