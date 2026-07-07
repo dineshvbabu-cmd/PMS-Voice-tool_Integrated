@@ -283,6 +283,16 @@ The drawer should appear inside the PMS/Purchase app, not as a separate website.
 - Suggested next action.
 - Confirmation buttons for write actions.
 
+The embedded manifest now explicitly declares supported render surfaces:
+
+```text
+right_drawer
+modal_popup
+inline_page_panel
+```
+
+Separate app windows should be disabled for production use. The host PMS/Purchase shell should call `openAssistantOverlay` and `renderAssistantResult` to display assistant output inside the existing page.
+
 ### Host Shell Adapter
 
 Mazik frontend should expose:
@@ -361,8 +371,10 @@ Execution:
 1. Navigate Purchase Link to extracted quotation page.
 2. Fetch requisition and quotation data.
 3. Compare vendors by landed cost, delivery, compliance, and payment terms.
-4. Present recommendation.
-5. If user says "approve vendor 2", create a draft and require confirmation.
+4. If the requisition or quote number is missing, show live candidate requisitions and ask the user to select one.
+5. If the quotation-line endpoint is not connected, show the live requisition context and ask for the quote number or endpoint capture instead of inventing supplier values.
+6. Present recommendation only after live supplier quote lines are available.
+7. If user says "approve vendor 2", create a draft and require confirmation.
 
 ## Production MVP Build Plan
 
@@ -373,6 +385,7 @@ Execution:
 - Support maintenance, defects, certificates, requisitions, PO/material receipt, quote comparison.
 - Navigate pages and show results.
 - No write actions yet.
+- Quote comparison must use live requisition and quotation-line data. If quote context is missing, the assistant asks a follow-up question or shows selectable live requisitions.
 
 ### Phase 2: Drafted Write Actions
 

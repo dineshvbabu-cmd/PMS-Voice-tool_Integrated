@@ -1629,30 +1629,6 @@ function buildPurchaseOrderPresentation(result, params = {}) {
   });
 }
 
-function parseAmount(value) {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-
-  const match = String(value || "")
-    .replace(/,/g, "")
-    .match(/-?\d+(?:\.\d+)?/);
-  return match ? Number(match[0]) : 0;
-}
-
-function formatMoney(value, currency = "USD") {
-  const amount = Number(value || 0);
-  return `${currency} ${amount.toLocaleString("en-US", {
-    maximumFractionDigits: 0
-  })}`;
-}
-
-function numberSeed(value) {
-  return String(value || "")
-    .split("")
-    .reduce((total, char) => total + char.charCodeAt(0), 0);
-}
-
 function selectQuoteContextRow(rows, params = {}) {
   const liveRows = Array.isArray(rows) ? rows : [];
   if (!liveRows.length) {
@@ -1679,121 +1655,68 @@ function selectQuoteContextRow(rows, params = {}) {
   return preferred || liveRows[0];
 }
 
-function buildDemoQuoteRows(contextRow = {}) {
-  const contextKey = firstNonEmpty(contextRow.requisitionNumber, contextRow.documentHeader, contextRow.requisitionId, "live-requisition");
-  const seed = numberSeed(contextKey);
-  const base = parseAmount(contextRow.poAmountWithCurrency || contextRow.amount || contextRow.estimatedAmount) || 12000 + (seed % 3500);
-  const quoteLines = [
-    {
-      supplier: "Oceanic Marine Supply",
-      quotedAmount: Math.round(base * 1.02),
-      freight: 420 + (seed % 180),
-      discountPercent: 2,
-      deliveryDays: 12 + (seed % 4),
-      paymentTerms: "30 days",
-      technicalCompliance: "Full",
-      complianceScore: 100
-    },
-    {
-      supplier: "Global Ship Spares",
-      quotedAmount: Math.round(base * 0.97),
-      freight: 780 + (seed % 260),
-      discountPercent: 0,
-      deliveryDays: 20 + (seed % 6),
-      paymentTerms: "Advance 30%",
-      technicalCompliance: "Partial - delivery risk",
-      complianceScore: 78
-    },
-    {
-      supplier: "Nautilus Technical Trading",
-      quotedAmount: Math.round(base * 1.06),
-      freight: 350 + (seed % 140),
-      discountPercent: 3,
-      deliveryDays: 8 + (seed % 3),
-      paymentTerms: "45 days",
-      technicalCompliance: "Full",
-      complianceScore: 96
-    }
-  ].map((line) => {
-    const discount = line.quotedAmount * (line.discountPercent / 100);
-    const landedCost = Math.round(line.quotedAmount + line.freight - discount);
-    const score =
-      landedCost * 0.55 +
-      line.deliveryDays * 90 * 0.25 +
-      (100 - line.complianceScore) * 80 * 0.2;
-
-    return {
-      ...line,
-      discount,
-      landedCost,
-      score
-    };
-  });
-
-  return quoteLines
-    .sort((left, right) => left.score - right.score)
-    .map((line, index) => ({
-      ...line,
-      rank: index + 1,
-      recommendation: index === 0 ? "Recommended" : index === 1 ? "Commercial backup" : "Technical backup"
-    }));
-}
-
-function buildQuoteComparisonPresentation(result, contextRow, params = {}) {
-  const rows = buildDemoQuoteRows(contextRow || {});
-  const best = rows[0];
-  const highest = rows.reduce((max, row) => Math.max(max, row.landedCost), 0);
-  const requisitionLabel = firstNonEmpty(contextRow?.requisitionNumber, contextRow?.documentHeader, contextRow?.requisitionId, "live requisition");
-
+function buildQuoteCandidatePresentation(result, rows, params = {}) {
   return buildTablePresentation({
-    title: "Quote comparison",
-    subtitle: contextRow
-      ? `Live Purchase Link context: ${requisitionLabel} for ${firstNonEmpty(contextRow.vesselName, "selected vessel")}. Vendor quote lines are demo comparison values until the extracted-quotation endpoint is connected.`
-      : "No live requisition row was returned. Showing the comparison layout with demo supplier lines.",
+    title: "Select requisition for quote comparison",
+    subtitle:
+      "I need the requisition or quote reference before I can compare supplier quotations. Select a live requisition below or ask with a requisition number.",
     columns: [
-      { key: "rank", label: "Rank" },
-      { key: "supplier", label: "Supplier" },
-      { key: "quotedAmountDisplay", label: "Quoted amount" },
-      { key: "freightDisplay", label: "Freight" },
-      { key: "discountDisplay", label: "Discount" },
-      { key: "landedCostDisplay", label: "Landed cost" },
-      { key: "deliveryDaysDisplay", label: "Delivery" },
-      { key: "paymentTerms", label: "Payment" },
-      { key: "technicalCompliance", label: "Technical" },
-      { key: "recommendation", label: "Recommendation" }
+      { key: "vesselName", label: "Vessel" },
+      { key: "requisitionNumber", label: "Requisition" },
+      { key: "currentStatus", label: "Status" },
+      { key: "priority", label: "Priority" },
+      { key: "category", label: "Category" },
+      { key: "assignee", label: "Assignee" },
+      { key: "createdDateFormatted", label: "Created" }
     ],
     rows: rows.map((row) => ({
-      id: `${contextRow?.requisitionId || "quote"}-${row.rank}`,
-      requisitionId: contextRow?.requisitionId || "",
-      requisitionNumber: requisitionLabel,
-      vesselName: contextRow?.vesselName || "",
-      rank: row.rank,
-      supplier: row.supplier,
-      quotedAmountDisplay: formatMoney(row.quotedAmount),
-      freightDisplay: formatMoney(row.freight),
-      discountDisplay: `${row.discountPercent}% (${formatMoney(row.discount)})`,
-      landedCostDisplay: formatMoney(row.landedCost),
-      deliveryDaysDisplay: `${row.deliveryDays} days`,
-      paymentTerms: row.paymentTerms,
-      technicalCompliance: row.technicalCompliance,
-      recommendation: row.recommendation,
-      raw: {
-        ...row,
-        contextRow,
-        source: "demo_quote_comparison"
-      }
+      id: String(row.requisitionId || row.id || row.requisitionNumber),
+      requisitionId: row.requisitionId,
+      vesselName: row.vesselName,
+      requisitionNumber: firstNonEmpty(row.requisitionNumber, row.documentHeader, row.requisitionId),
+      currentStatus: row.currentStatus,
+      priority: row.priority,
+      category: row.category,
+      assignee: row.assignee,
+      createdDateFormatted: formatDate(row.requisitionCreateDate || row.createdDate),
+      raw: row
     })),
     summary: [
       { label: "Live rows checked", value: Array.isArray(result?.body?.data) ? result.body.data.length : 0 },
-      { label: "Requisition", value: requisitionLabel },
-      { label: "Recommended supplier", value: best?.supplier || "-" },
-      { label: "Estimated saving", value: best ? formatMoney(highest - best.landedCost) : "-" }
+      { label: "Candidate rows", value: rows.length },
+      { label: "Search", value: params.keyword || params.vesselKeyword || "All live requisitions" },
+      { label: "Next input needed", value: "Requisition or quote number" }
     ],
-    rowActions: contextRow?.requisitionId
-      ? [{ label: "Show requisition detail", promptTemplate: "Show requisition {{requisitionId}} detail with workflow log and delivery info" }]
-      : [],
+    rowActions: [
+      { label: "Compare this requisition", promptTemplate: "Compare vendor quotes for requisition {{requisitionId}}" },
+      { label: "Show requisition detail", promptTemplate: "Show requisition {{requisitionId}} detail with workflow log and delivery info" }
+    ],
     actionTarget: "quoteComparison"
   });
+}
+
+function buildQuoteReadinessPresentation(detail, workflow, delivery) {
+  const deliveryRecord = firstRecord(delivery);
+  const fields = [
+    { label: "Requisition", value: firstNonEmpty(detail?.documentHeader, detail?.requisitionNumber, detail?.requisitionId) },
+    { label: "Vessel", value: firstNonEmpty(detail?.vessel?.vesselName, detail?.vesselName) },
+    { label: "Status", value: firstNonEmpty(detail?.approvedReq, detail?.currentStatus) },
+    { label: "Priority", value: firstNonEmpty(detail?.pmPreference?.description, detail?.priority, detail?.priorityName) },
+    { label: "Department", value: firstNonEmpty(detail?.departments?.departmentName, detail?.departmentName) },
+    { label: "Description", value: firstNonEmpty(detail?.descriptionData, detail?.description) },
+    { label: "Order reference", value: firstNonEmpty(detail?.orderReferenceNames, detail?.orderRef) },
+    { label: "Expected delivery port", value: firstNonEmpty(deliveryRecord?.expectedDeliveryPort, detail?.expectedDeliveryPort) },
+    { label: "Expected delivery date", value: formatDate(deliveryRecord?.expectedDeliveryDate || detail?.expectedDeliveryDate) },
+    { label: "Workflow entries", value: Array.isArray(workflow) ? String(workflow.length) : "" }
+  ].filter((field) => field.value);
+
+  return {
+    type: "detail",
+    title: "Quote comparison needs live quotation lines",
+    subtitle:
+      "I found the live requisition context. To compare suppliers correctly, connect the extracted quotation/vendor quote endpoint or provide the quote number.",
+    fields
+  };
 }
 
 function firstRecord(value) {
@@ -2427,6 +2350,34 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
       };
     }
 
+    if (routed.params?.requisitionId) {
+      const detailResult = await client.getRequisitionDetail(effectiveSystemKey, effectiveSession, routed.params.requisitionId);
+      const workflowResult = await client.getRequisitionLog(effectiveSystemKey, effectiveSession, routed.params.requisitionId);
+      const deliveryResult = await client.getRequisitionDeliveryInfo(effectiveSystemKey, effectiveSession, routed.params.requisitionId);
+      const detail = unwrapResultData(detailResult);
+      const workflow = unwrapResultData(workflowResult);
+      const delivery = unwrapResultData(deliveryResult);
+
+      return {
+        intent: "Quote comparison",
+        normalizedEnglish,
+        reply:
+          `${autoRoutedNotice}I found the live requisition context. I still need the live extracted quotation/vendor quote lines before I can rank suppliers correctly. Provide the quote number, or connect the extracted quotation endpoint so I can continue without guessing.`.trim(),
+        result: {
+          detail: detailResult,
+          workflow: workflowResult,
+          delivery: deliveryResult,
+          needsClarification: true,
+          missingFields: ["quoteNumber", "quotationLinesEndpoint"],
+          nextPrompts: [
+            `Compare vendor quotes for requisition ${routed.params.requisitionId} with quote number <quote-number>`,
+            "Open the extracted quotation page and capture the vendor quote endpoint"
+          ]
+        },
+        presentation: detailResult.ok ? buildQuoteReadinessPresentation(detail, workflow, delivery) : null
+      };
+    }
+
     const trackingParams = {
       track: "Requisition Track",
       keyword: routed.params?.keyword || routed.params?.vesselKeyword || ""
@@ -2445,28 +2396,32 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
       }
     }
 
-    const contextRow = result.ok ? selectQuoteContextRow(liveRows, routed.params || {}) : null;
-    const presentation = result.ok ? buildQuoteComparisonPresentation(result, contextRow, routed.params || {}) : null;
-    const contextText = contextRow
-      ? `I used live Purchase Link requisition ${firstNonEmpty(
-          contextRow.requisitionNumber,
-          contextRow.documentHeader,
-          contextRow.requisitionId
-        )} as the comparison context. `
-      : "";
+    const quotedRows = liveRows.filter((row) =>
+      containsAny(normalize([row.currentStatus, row.requisitionNumber, row.documentHeader, row.category].filter(Boolean).join(" ")), [
+        "quote",
+        "quotation",
+        "rfq",
+        "inquiry"
+      ])
+    );
+    const candidateRows = quotedRows.length ? quotedRows : liveRows.slice(0, 25);
+    const contextRow = result.ok ? selectQuoteContextRow(candidateRows, routed.params || {}) : null;
 
     return {
       intent: "Quote comparison",
       normalizedEnglish,
       reply:
-        `${autoRoutedNotice}${contextText}${summarizeResult(result)} Review the ranked supplier comparison and recommendation below.`.trim(),
+        `${autoRoutedNotice}${summarizeResult(
+          result
+        )} I need the exact requisition or quote number before I can compare supplier quotation lines. Select a requisition below or ask: "Compare vendor quotes for requisition <number>".`.trim(),
       result: {
         source: result,
         liveRequisition: contextRow,
-        note:
-          "Supplier quote lines are demo comparison values. Connect the extracted quotation endpoint to replace these with live supplier quotations."
+        needsClarification: true,
+        missingFields: ["requisitionIdOrQuoteNumber"],
+        note: "No supplier comparison was generated because live quotation line data is not yet connected."
       },
-      presentation
+      presentation: result.ok ? buildQuoteCandidatePresentation(result, candidateRows, routed.params || {}) : null
     };
   }
 

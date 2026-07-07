@@ -142,6 +142,12 @@ function createEmbeddedAssistantPlan({ query, pageContext = {}, userContext = {}
     safetyLevel: intent.safetyLevel,
     confirmationRequired: intent.confirmationRequired,
     executionMode: intent.confirmationRequired ? "draft_then_confirm" : "read_and_present",
+    renderTarget: {
+      mode: "in_app_overlay",
+      preferredSurfaces: ["right_drawer", "modal_popup", "inline_page_panel"],
+      blockSeparateWindow: true,
+      anchorRoute: page.route
+    },
     api: {
       queryEndpoint: "/api/copilot/query",
       confirmEndpoint: "/api/copilot/confirm",
@@ -152,6 +158,7 @@ function createEmbeddedAssistantPlan({ query, pageContext = {}, userContext = {}
         ? "Keep the user on the current page and refresh page context."
         : `Navigate the host app to ${page.route}.`,
       "Call /api/copilot/query with the natural-language command and active Mazik session.",
+      "Render the assistant response as a right-side drawer, modal popup, or inline panel inside the existing Mazik page. Do not open a separate app window.",
       intent.confirmationRequired
         ? "Render the prepared draft beside the live Mazik page and wait for explicit user confirmation."
         : "Render results in the assistant panel and highlight matching rows on the current page when row IDs are available.",
@@ -179,9 +186,16 @@ function createEmbeddedManifest() {
       "getCurrentRoute",
       "navigateToRoute",
       "getMazikAuthSession",
+      "openAssistantOverlay",
+      "renderAssistantResult",
       "showConfirmationDialog",
       "highlightRows"
     ],
+    renderSurfaces: {
+      default: "right_drawer",
+      supported: ["right_drawer", "modal_popup", "inline_page_panel"],
+      separateWindowAllowed: false
+    },
     pageCatalog,
     events: [
       "assistant:opened",
