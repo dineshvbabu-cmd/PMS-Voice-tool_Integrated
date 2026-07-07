@@ -1,0 +1,832 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Atlas VoiceOps Embedded PMS/Purchase Demo</title>
+  <style>
+    :root {
+      --ink: #12213a;
+      --muted: #607089;
+      --line: #d7e0ec;
+      --soft: #f5f8fc;
+      --panel: #ffffff;
+      --blue: #2368b8;
+      --cyan: #00a9e8;
+      --green: #11874a;
+      --amber: #c77900;
+      --red: #c93434;
+      --violet: #7157e8;
+      --shadow: 0 18px 60px rgba(26, 44, 74, 0.16);
+      font-family: "Segoe UI", Calibri, Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: linear-gradient(135deg, #eaf1f9, #f8fbff 45%, #e8f6f1);
+    }
+
+    button, input, select, textarea { font: inherit; }
+    button { cursor: pointer; }
+
+    .app-shell {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 236px minmax(0, 1fr);
+    }
+
+    .sidebar {
+      background: #1f3d61;
+      color: #eaf5ff;
+      padding: 18px 14px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 22px;
+      font-weight: 800;
+      font-size: 19px;
+    }
+
+    .logo {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: #f5fbff;
+      color: #1f3d61;
+      font-weight: 900;
+    }
+
+    .nav-section {
+      margin: 18px 0 8px;
+      color: #aac2dd;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+    }
+
+    .nav-item {
+      width: 100%;
+      text-align: left;
+      border: 0;
+      border-radius: 10px;
+      padding: 11px 12px;
+      margin: 4px 0;
+      color: #eaf5ff;
+      background: transparent;
+    }
+
+    .nav-item.active, .nav-item:hover {
+      background: rgba(255,255,255,0.12);
+    }
+
+    .main {
+      min-width: 0;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: center;
+      background: rgba(255,255,255,0.86);
+      border-bottom: 1px solid var(--line);
+      padding: 14px 22px;
+      backdrop-filter: blur(10px);
+      position: sticky;
+      top: 0;
+      z-index: 5;
+    }
+
+    .crumb {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    h1 {
+      margin: 4px 0 0;
+      font-size: 24px;
+    }
+
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .pill {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 999px;
+      padding: 8px 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .assistant-launch {
+      border: 0;
+      border-radius: 18px;
+      padding: 12px 16px;
+      background: linear-gradient(135deg, var(--cyan), var(--blue));
+      color: #fff;
+      font-weight: 800;
+      box-shadow: 0 12px 24px rgba(0, 109, 184, 0.28);
+    }
+
+    .content {
+      min-width: 0;
+      padding: 22px;
+      display: grid;
+      gap: 18px;
+    }
+
+    .card {
+      background: rgba(255,255,255,0.92);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .card-head {
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .card-title {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .filters {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .filters input, .filters select {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px 12px;
+      min-width: 170px;
+      background: #fff;
+    }
+
+    .kpis {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .kpi {
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: #fff;
+    }
+
+    .kpi span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .kpi strong {
+      display: block;
+      margin-top: 8px;
+      font-size: 24px;
+    }
+
+    .table-wrap {
+      overflow: auto;
+    }
+
+    table {
+      width: 100%;
+      min-width: 880px;
+      border-collapse: collapse;
+      background: #fff;
+    }
+
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 12px 14px;
+      text-align: left;
+      vertical-align: top;
+      font-size: 14px;
+    }
+
+    th {
+      background: #eef4fb;
+      color: #27486e;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      position: sticky;
+      top: 0;
+    }
+
+    tr:hover td {
+      background: #f7fbff;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 4px 9px;
+      font-size: 12px;
+      font-weight: 700;
+      background: #eef4fb;
+      color: #27517d;
+    }
+
+    .badge.red { background: #ffe9e9; color: var(--red); }
+    .badge.green { background: #e8f7ef; color: var(--green); }
+    .badge.amber { background: #fff1d9; color: var(--amber); }
+
+    .assistant-panel {
+      position: fixed;
+      top: 76px;
+      right: 18px;
+      bottom: 18px;
+      width: min(520px, calc(100vw - 36px));
+      background: #071527;
+      color: #f4f9ff;
+      border-radius: 24px;
+      border: 1px solid rgba(111, 176, 240, 0.28);
+      box-shadow: 0 30px 90px rgba(3, 12, 24, 0.45);
+      display: none;
+      grid-template-rows: auto auto 1fr;
+      overflow: hidden;
+      z-index: 20;
+    }
+
+    .assistant-panel.open { display: grid; }
+
+    .assistant-head {
+      padding: 18px;
+      border-bottom: 1px solid rgba(111,176,240,0.18);
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .assistant-head h2 {
+      margin: 0;
+      font-size: 19px;
+    }
+
+    .close {
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      border: 1px solid rgba(255,255,255,0.18);
+      background: rgba(255,255,255,0.06);
+      color: #fff;
+    }
+
+    .command-area {
+      padding: 16px 18px;
+      border-bottom: 1px solid rgba(111,176,240,0.18);
+      display: grid;
+      gap: 10px;
+    }
+
+    .command-area textarea {
+      width: 100%;
+      min-height: 82px;
+      border: 1px solid rgba(111,176,240,0.24);
+      background: #091a2f;
+      color: #f4f9ff;
+      border-radius: 16px;
+      padding: 12px;
+      resize: vertical;
+    }
+
+    .assistant-buttons {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .run, .mic, .sample {
+      border: 0;
+      border-radius: 14px;
+      padding: 10px 12px;
+      font-weight: 700;
+    }
+
+    .run { background: #4fd3ff; color: #03111d; }
+    .mic { background: rgba(255,255,255,0.10); color: #fff; border: 1px solid rgba(255,255,255,0.14); }
+    .sample { background: #132b49; color: #bfe5ff; border: 1px solid rgba(111,176,240,0.24); }
+
+    .assistant-body {
+      padding: 18px;
+      overflow: auto;
+      display: grid;
+      align-content: start;
+      gap: 14px;
+    }
+
+    .assistant-card {
+      border: 1px solid rgba(111,176,240,0.22);
+      background: #0c2038;
+      border-radius: 18px;
+      padding: 14px;
+    }
+
+    .assistant-card h3 {
+      margin: 0 0 8px;
+      font-size: 17px;
+    }
+
+    .assistant-card p {
+      color: #b7cbe2;
+      line-height: 1.5;
+      margin: 0;
+    }
+
+    .question {
+      border-color: rgba(255, 194, 102, 0.38);
+      background: #221b0f;
+    }
+
+    .result-table {
+      width: 100%;
+      min-width: 0;
+      color: #eef7ff;
+      background: transparent;
+    }
+
+    .result-table th, .result-table td {
+      border-bottom: 1px solid rgba(111,176,240,0.18);
+      padding: 9px 8px;
+      font-size: 12px;
+    }
+
+    .result-table th {
+      background: rgba(255,255,255,0.06);
+      color: #9fc8ef;
+      position: static;
+    }
+
+    .row-action {
+      border: 0;
+      border-radius: 999px;
+      padding: 7px 10px;
+      background: #4fd3ff;
+      color: #02101c;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .confirm-box {
+      display: grid;
+      gap: 10px;
+    }
+
+    .confirm-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .field-card {
+      border: 1px solid rgba(111,176,240,0.18);
+      border-radius: 12px;
+      padding: 10px;
+      background: rgba(255,255,255,0.05);
+    }
+
+    .field-card span {
+      color: #9fc8ef;
+      font-size: 12px;
+      display: block;
+    }
+
+    .field-card strong {
+      display: block;
+      margin-top: 4px;
+      font-size: 13px;
+    }
+
+    .confirm-action {
+      border: 0;
+      border-radius: 14px;
+      padding: 11px 14px;
+      background: #23c477;
+      color: #04180d;
+      font-weight: 900;
+    }
+
+    .samples {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    @media (max-width: 980px) {
+      .app-shell { grid-template-columns: 1fr; }
+      .sidebar { display: none; }
+      .topbar { align-items: flex-start; flex-direction: column; }
+      .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .assistant-panel { top: 12px; left: 12px; right: 12px; bottom: 12px; width: auto; }
+    }
+
+    @media (max-width: 620px) {
+      .kpis { grid-template-columns: 1fr; }
+      .confirm-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Mazik navigation">
+      <div class="brand"><div class="logo">A</div> Atlas VoiceOps</div>
+      <div class="nav-section">PMS Link</div>
+      <button class="nav-item active" data-screen="maintenance">Maintenance Forecast</button>
+      <button class="nav-item" data-screen="defects">Defects</button>
+      <button class="nav-item" data-screen="certificates">Certificates</button>
+      <div class="nav-section">Purchase Link</div>
+      <button class="nav-item" data-screen="requisitions">Requisition Tracking</button>
+      <button class="nav-item" data-screen="purchaseOrders">Purchase Orders</button>
+      <button class="nav-item" data-screen="quotes">Extracted Quotations</button>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <div class="crumb" id="crumb">PMS Link / Maintenance Forecast</div>
+          <h1 id="screenTitle">Maintenance Forecast</h1>
+        </div>
+        <div class="top-actions">
+          <span class="pill">Embedded in production page</span>
+          <span class="pill">Live-data-first behavior demo</span>
+          <button class="assistant-launch" id="openAssistant">Ask Atlas</button>
+        </div>
+      </header>
+
+      <section class="content">
+        <div class="kpis" id="kpis"></div>
+        <section class="card">
+          <div class="card-head">
+            <h2 class="card-title" id="tableTitle">Production Screen Data</h2>
+            <div class="filters">
+              <input id="searchBox" placeholder="Search this screen" />
+              <select id="vesselFilter">
+                <option>All vessels</option>
+                <option>Holmes</option>
+                <option>Alkebulan</option>
+                <option>Annexy</option>
+              </select>
+            </div>
+          </div>
+          <div class="table-wrap" id="screenTable"></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <aside class="assistant-panel" id="assistantPanel" aria-label="Atlas assistant" aria-live="polite">
+    <div class="assistant-head">
+      <div>
+        <div class="crumb">In-page assistant overlay</div>
+        <h2>Atlas VoiceOps</h2>
+      </div>
+      <button class="close" id="closeAssistant" aria-label="Close assistant">X</button>
+    </div>
+    <div class="command-area">
+      <textarea id="commandInput" placeholder="Ask in voice or text, e.g. Compare quote on live requisition"></textarea>
+      <div class="assistant-buttons">
+        <button class="run" id="runCommand">Run command</button>
+        <button class="mic" id="voiceDemo">Voice demo</button>
+      </div>
+      <div class="samples">
+        <button class="sample">Compare quote on live requisition</button>
+        <button class="sample">Compare vendor quotes for requisition 17474</button>
+        <button class="sample">Show overdue critical maintenance for vessel Holmes</button>
+        <button class="sample">Close overdue pump job completed today</button>
+        <button class="sample">Find fuel pump spare</button>
+        <button class="sample">Create requisition for fuel pump spare on Alkebulan</button>
+      </div>
+    </div>
+    <div class="assistant-body" id="assistantBody"></div>
+  </aside>
+
+  <script>
+    const data = {
+      maintenance: {
+        title: "Maintenance Forecast",
+        crumb: "PMS Link / Maintenance Forecast",
+        kpis: [
+          ["Overdue jobs", "12"],
+          ["Critical overdue", "3"],
+          ["Due in 30 days", "46"],
+          ["Awaiting spares", "8"]
+        ],
+        columns: ["Vessel", "Job", "Component", "Due date", "Critical", "Status"],
+        rows: [
+          ["Holmes", "Check Non Return Valve", "Fuel Oil Transfer Pump", "2026-05-26", "Yes", "Overdue"],
+          ["Holmes", "Purifier Bowl Inspection", "FO Purifier No.1", "2026-06-02", "No", "Overdue"],
+          ["Alkebulan", "Lifeboat Davit Yearly Inspection", "Lifeboat Davit Winch", "2026-07-27", "Yes", "Due soon"],
+          ["Annexy", "Emergency Fire Pump Test", "Fire Pump", "2026-07-18", "Yes", "Due soon"]
+        ]
+      },
+      defects: {
+        title: "Defects",
+        crumb: "PMS Link / Defects",
+        kpis: [["Open", "18"], ["Overdue", "4"], ["Critical", "2"], ["Due in 30 days", "9"]],
+        columns: ["Vessel", "Defect", "Component", "Target date", "Status", "Critical"],
+        rows: [
+          ["Holmes", "DF-2026-018", "Incinerator", "2026-06-15", "Open", "No"],
+          ["Alkebulan", "DF-2026-022", "Emergency Generator", "2026-05-30", "Overdue", "Yes"]
+        ]
+      },
+      certificates: {
+        title: "Certificates",
+        crumb: "PMS Link / Certificates",
+        kpis: [["Overdue", "1"], ["Due in 30 days", "6"], ["Due in 60 days", "14"], ["Total", "420"]],
+        columns: ["Vessel", "Certificate", "Expiry", "Status", "Group"],
+        rows: [
+          ["Holmes", "Safety Equipment Certificate", "2026-07-28", "Due soon", "Statutory"],
+          ["Alkebulan", "Load Line Certificate", "2026-09-10", "Current", "Statutory"]
+        ]
+      },
+      requisitions: {
+        title: "Requisition Tracking",
+        crumb: "Purchase Link / Requisition Tracking",
+        kpis: [["RFQ", "7"], ["PO Send", "14"], ["Awaiting approval", "5"], ["Delayed delivery", "3"]],
+        columns: ["Vessel", "Requisition", "Description", "Status", "Priority", "Created"],
+        rows: [
+          ["Holmes", "17474 / REQ-O-WHM-SV-2026-1783", "Fire extinguishing system service", "RFQ / Quotation pending", "Normal", "2026-05-11"],
+          ["Alkebulan", "17009 / REQ-O-AKN-SV-2026-1491", "Class occasional survey service", "PO SEND", "Normal", "2026-04-20"],
+          ["Annexy", "18021 / REQ-O-ANY-SV-2026-1811", "Fuel pump spare kit", "Inquiry", "Critical", "2026-06-02"]
+        ]
+      },
+      purchaseOrders: {
+        title: "Purchase Orders",
+        crumb: "Purchase Link / Purchase Orders",
+        kpis: [["Open POs", "22"], ["Material received", "11"], ["Invoice pending", "5"], ["Delayed", "4"]],
+        columns: ["Vessel", "PO", "Supplier", "Amount", "Material receipt", "Invoice"],
+        rows: [
+          ["Holmes", "PO-2026-4401", "Oceanic Marine Supply", "USD 12,800", "Pending", "Not invoiced"],
+          ["Alkebulan", "PO-2026-4210", "Dockyard Services Ltd", "USD 18,200", "Received", "Pending"]
+        ]
+      },
+      quotes: {
+        title: "Extracted Quotations",
+        crumb: "Purchase Link / Extracted Quotations",
+        kpis: [["Awaiting comparison", "7"], ["Incomplete quotes", "3"], ["Recommended", "0"], ["Need endpoint", "1"]],
+        columns: ["Requisition", "Quote batch", "Supplier count", "Line count", "Status"],
+        rows: [
+          ["17474 / REQ-O-WHM-SV-2026-1783", "Not connected in demo", "-", "-", "Endpoint required"],
+          ["18021 / REQ-O-ANY-SV-2026-1811", "RFQ-2026-221", "3", "6", "Ready when API connected"]
+        ]
+      }
+    };
+
+    let currentScreen = "maintenance";
+    const panel = document.getElementById("assistantPanel");
+    const body = document.getElementById("assistantBody");
+    const input = document.getElementById("commandInput");
+
+    function setScreen(screen) {
+      currentScreen = screen;
+      document.querySelectorAll(".nav-item").forEach(btn => btn.classList.toggle("active", btn.dataset.screen === screen));
+      const screenData = data[screen];
+      document.getElementById("screenTitle").textContent = screenData.title;
+      document.getElementById("crumb").textContent = screenData.crumb;
+      document.getElementById("tableTitle").textContent = screenData.title + " - current production screen";
+      document.getElementById("kpis").innerHTML = screenData.kpis.map(([label, value]) => `
+        <div class="kpi"><span>${label}</span><strong>${value}</strong></div>
+      `).join("");
+      document.getElementById("screenTable").innerHTML = renderTable(screenData.columns, screenData.rows);
+    }
+
+    function renderTable(columns, rows) {
+      return `
+        <table>
+          <thead><tr>${columns.map(c => `<th>${c}</th>`).join("")}</tr></thead>
+          <tbody>${rows.map(r => `<tr>${r.map(cell => `<td>${cellBadge(cell)}</td>`).join("")}</tr>`).join("")}</tbody>
+        </table>
+      `;
+    }
+
+    function cellBadge(value) {
+      const text = String(value);
+      if (/overdue|critical/i.test(text)) return `<span class="badge red">${text}</span>`;
+      if (/current|received|ready/i.test(text)) return `<span class="badge green">${text}</span>`;
+      if (/pending|due soon|rfq|inquiry|po send|endpoint/i.test(text)) return `<span class="badge amber">${text}</span>`;
+      return text;
+    }
+
+    function openAssistant() {
+      panel.classList.add("open");
+      if (!body.innerHTML.trim()) {
+        showWelcome();
+      }
+    }
+
+    function showWelcome() {
+      body.innerHTML = `
+        <div class="assistant-card">
+          <h3>Embedded assistant behavior demo</h3>
+          <p>This demo shows how Atlas should behave inside PMS/Purchase. It asks for missing context, uses live-screen style candidates, and refuses to invent quote comparisons without quotation lines.</p>
+        </div>
+      `;
+    }
+
+    function renderAssistantCard(title, message, className = "") {
+      return `<div class="assistant-card ${className}"><h3>${title}</h3><p>${message}</p></div>`;
+    }
+
+    function renderCandidateRequisitions() {
+      setScreen("requisitions");
+      body.innerHTML = `
+        ${renderAssistantCard("Need requisition or quote number", "I found live requisitions that may be ready for quote comparison. Select one or ask with a requisition number.", "question")}
+        <div class="assistant-card">
+          <h3>Live candidate requisitions</h3>
+          <table class="result-table">
+            <thead><tr><th>Vessel</th><th>Requisition</th><th>Status</th><th></th></tr></thead>
+            <tbody>
+              <tr><td>Holmes</td><td>17474</td><td>RFQ / Quotation pending</td><td><button class="row-action" onclick="runText('Compare vendor quotes for requisition 17474')">Select</button></td></tr>
+              <tr><td>Annexy</td><td>18021</td><td>Inquiry</td><td><button class="row-action" onclick="runText('Compare vendor quotes for requisition 18021')">Select</button></td></tr>
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function renderQuoteNeedsEndpoint(req) {
+      setScreen("quotes");
+      body.innerHTML = `
+        ${renderAssistantCard("Quote comparison needs live quotation lines", "I found requisition ${req}, but supplier quote line data is not connected in this demo. Production implementation must fetch the extracted quotation/vendor quote endpoint before ranking suppliers.", "question")}
+        <div class="assistant-card confirm-box">
+          <h3>Live requisition context</h3>
+          <div class="confirm-grid">
+            <div class="field-card"><span>Requisition</span><strong>${req}</strong></div>
+            <div class="field-card"><span>Vessel</span><strong>${req === "17474" ? "Holmes" : "Annexy"}</strong></div>
+            <div class="field-card"><span>Status</span><strong>RFQ / Quotation pending</strong></div>
+            <div class="field-card"><span>Next required data</span><strong>Quotation line endpoint or quote number</strong></div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderMaintenance() {
+      setScreen("maintenance");
+      body.innerHTML = `
+        ${renderAssistantCard("Live PMS maintenance result", "Showing overdue critical maintenance filtered for vessel Holmes. In production this comes from PMS maintenance forecast API/current page context.")}
+        <div class="assistant-card">
+          <table class="result-table">
+            <thead><tr><th>Job</th><th>Component</th><th>Due</th><th></th></tr></thead>
+            <tbody>
+              <tr><td>Check Non Return Valve</td><td>Fuel Oil Transfer Pump</td><td>2026-05-26</td><td><button class="row-action" onclick="runText('Close ship component job link 82225 completed today with remarks checked satisfactory')">Close</button></td></tr>
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function renderCloseClarification() {
+      setScreen("maintenance");
+      body.innerHTML = `
+        ${renderAssistantCard("Select exact maintenance job", "I found more than one possible job. Select the exact live job before I prepare a close action.", "question")}
+        <div class="assistant-card">
+          <table class="result-table">
+            <thead><tr><th>Vessel</th><th>Job</th><th>Component</th><th></th></tr></thead>
+            <tbody>
+              <tr><td>Holmes</td><td>Check Non Return Valve</td><td>Fuel Oil Transfer Pump</td><td><button class="row-action" onclick="runText('Close ship component job link 82225 completed today with remarks checked satisfactory')">Select</button></td></tr>
+              <tr><td>Holmes</td><td>Purifier Bowl Inspection</td><td>FO Purifier No.1</td><td><button class="row-action">Select</button></td></tr>
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function renderCloseConfirm() {
+      body.innerHTML = `
+        <div class="assistant-card confirm-box">
+          <h3>Maintenance completion ready</h3>
+          <p>Review the live job detail and completion values before confirming submission to PMS.</p>
+          <div class="confirm-grid">
+            <div class="field-card"><span>Job</span><strong>Check Non Return Valve</strong></div>
+            <div class="field-card"><span>Vessel</span><strong>Holmes</strong></div>
+            <div class="field-card"><span>Completion date</span><strong>Today</strong></div>
+            <div class="field-card"><span>Remarks</span><strong>Checked satisfactory</strong></div>
+          </div>
+          <button class="confirm-action" onclick="showSubmitted()">Confirm action</button>
+        </div>
+      `;
+    }
+
+    function renderInventoryVesselQuestion() {
+      setScreen("requisitions");
+      body.innerHTML = `
+        ${renderAssistantCard("Vessel needed", "I need the vessel before I can search production inventory/stores for this spare.", "question")}
+        <div class="assistant-card">
+          <h3>Try one of these</h3>
+          <p><button class="row-action" onclick="runText('Find fuel pump spare for vessel Alkebulan')">Use Alkebulan</button>
+          <button class="row-action" onclick="runText('Find fuel pump spare for vessel Holmes')">Use Holmes</button></p>
+        </div>
+      `;
+    }
+
+    function renderInventoryItems(vessel) {
+      setScreen("requisitions");
+      body.innerHTML = `
+        ${renderAssistantCard("Live inventory candidates", "Select the live spare/store item before preparing a requisition draft.")}
+        <div class="assistant-card">
+          <table class="result-table">
+            <thead><tr><th>Vessel</th><th>Item</th><th>Type</th><th></th></tr></thead>
+            <tbody>
+              <tr><td>${vessel}</td><td>Fuel pump overhaul kit</td><td>Spares</td><td><button class="row-action" onclick="renderReqConfirm('${vessel}')">Prepare</button></td></tr>
+              <tr><td>${vessel}</td><td>Fuel pump gasket set</td><td>Spares</td><td><button class="row-action" onclick="renderReqConfirm('${vessel}')">Prepare</button></td></tr>
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function renderReqConfirm(vessel) {
+      body.innerHTML = `
+        <div class="assistant-card confirm-box">
+          <h3>Requisition draft ready</h3>
+          <p>Review the resolved vessel and inventory item. Production app would submit only after confirmation.</p>
+          <div class="confirm-grid">
+            <div class="field-card"><span>Vessel</span><strong>${vessel}</strong></div>
+            <div class="field-card"><span>Item</span><strong>Fuel pump overhaul kit</strong></div>
+            <div class="field-card"><span>Type</span><strong>Spares</strong></div>
+            <div class="field-card"><span>Workflow</span><strong>Technical approval</strong></div>
+          </div>
+          <button class="confirm-action" onclick="showSubmitted()">Confirm action</button>
+        </div>
+      `;
+    }
+
+    function renderUnknown() {
+      body.innerHTML = `
+        ${renderAssistantCard("Choose production area", "I need one more detail before calling production data. Is this PMS maintenance, defects, certificates, Purchase requisitions, inventory, PO/material receipt, or quote comparison?", "question")}
+      `;
+    }
+
+    function showSubmitted() {
+      body.innerHTML = renderAssistantCard("Submitted after confirmation", "This demo shows the confirmation point. In production this would call the Mazik write endpoint and show the PMS/Purchase response receipt.");
+    }
+
+    function runText(text) {
+      input.value = text;
+      runCommand();
+    }
+
+    function runCommand() {
+      const text = input.value.trim().toLowerCase();
+      openAssistant();
+      if (!text) return showWelcome();
+      if (text.includes("compare") && text.includes("quote") && !text.match(/requisition\s+\d+/)) return renderCandidateRequisitions();
+      const reqMatch = text.match(/requisition\s+(\d+)/);
+      if (text.includes("compare") && text.includes("quote") && reqMatch) return renderQuoteNeedsEndpoint(reqMatch[1]);
+      if (text.includes("overdue") && text.includes("maintenance")) return renderMaintenance();
+      if (text.includes("close") && text.includes("ship component job link")) return renderCloseConfirm();
+      if (text.includes("close")) return renderCloseClarification();
+      if ((text.includes("fuel pump") || text.includes("spare")) && !text.includes("vessel")) return renderInventoryVesselQuestion();
+      if (text.includes("fuel pump") && text.includes("vessel")) {
+        const vessel = text.includes("holmes") ? "Holmes" : "Alkebulan";
+        return renderInventoryItems(vessel);
+      }
+      if (text.includes("create requisition")) return renderInventoryVesselQuestion();
+      return renderUnknown();
+    }
+
+    document.querySelectorAll(".nav-item").forEach(btn => btn.addEventListener("click", () => setScreen(btn.dataset.screen)));
+    document.getElementById("openAssistant").addEventListener("click", openAssistant);
+    document.getElementById("closeAssistant").addEventListener("click", () => panel.classList.remove("open"));
+    document.getElementById("runCommand").addEventListener("click", runCommand);
+    document.getElementById("voiceDemo").addEventListener("click", () => {
+      input.value = "Compare quote on live requisition";
+      runCommand();
+    });
+    document.querySelectorAll(".sample").forEach(btn => btn.addEventListener("click", () => runText(btn.textContent)));
+
+    setScreen("maintenance");
+  </script>
+</body>
+</html>

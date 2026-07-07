@@ -22,6 +22,7 @@ apps/
   web/   product UI frontend
 docs/
   CLEAN_ARCHITECTURE_REFACTOR.md
+  EMBEDDED_PMS_PURCHASE_ASSISTANT_PRD.md
   FRONTEND_UI_SYSTEM.md
   INTEGRATION_NOTES.md
   MAZIK_LIVE_ENDPOINT_INVENTORY.md
@@ -38,6 +39,11 @@ The API has been refactored toward clean architecture boundaries:
 The frontend now has reusable UI and presentation components:
 
 - [docs/FRONTEND_UI_SYSTEM.md](docs/FRONTEND_UI_SYSTEM.md)
+
+The implementation-ready PRD and standalone stakeholder demo are here:
+
+- [docs/EMBEDDED_PMS_PURCHASE_ASSISTANT_PRD.md](docs/EMBEDDED_PMS_PURCHASE_ASSISTANT_PRD.md)
+- [public/embedded-assistant-production-demo.html](public/embedded-assistant-production-demo.html)
 
 ## Production Embedded Assistant Plan
 
