@@ -332,10 +332,11 @@ async function routeWithOpenAI(query, systemKey) {
           content: [
             "You route Mazik PMS and Mazik Purchase operational requests.",
             "Return strict JSON with keys action, normalizedEnglish, params, explanation.",
-            "Supported actions are maintenance_list, maintenance_detail, defects_list, certificates_list, requisitions_list, purchase_orders_list, requisition_detail, inventory_items, close_job, postponement, requisition_create, help.",
+            "Supported actions are maintenance_list, maintenance_detail, defects_list, certificates_list, requisitions_list, purchase_orders_list, requisition_detail, inventory_items, quote_comparison, close_job, postponement, requisition_create, help.",
             "For list requests, extract filters such as overdue, due, critical, nonCritical, significant, open, closed, completed, statusText, dueWindowDays, and keyword.",
             "Map natural operator wording like jobs, work orders, PM jobs, requisitions, PRs, RFQs, POs, material receipts, invoices, certificates, surveys, expiring, coming due, and blocked by spares.",
             "For inventory_items params, use vesselKeyword, keyword, and requisitionMode.",
+            "For quote_comparison params, use requisitionId, vesselKeyword, keyword, statusText, and includeRecommendation.",
             "For close_job params, use jobId, completionDate, closureDescription, maintenanceCauseId, overdueRemarks, currentCounterValue.",
             "For postponement params, use jobId, postponeMode, postponeDate, postponeFrequency, postponeReasonId, remarks, approvedBy, currentDueDate.",
             "For requisition_create params, prefer requisitionPayload when the user provides structured JSON. Otherwise use vesselKeyword, keyword, requisitionMode, inventoryItemId, inventoryItemName, inventoryItemType, inventoryItemPath, inventoryAccountCode, description, and workflow.",
@@ -433,6 +434,24 @@ function routeLocally(query) {
       "vendor follow up",
       "procurement"
     ]);
+  const quoteComparisonSignals = containsAny(text, [
+    "compare quote",
+    "compare quotes",
+    "quote comparison",
+    "quotation comparison",
+    "vendor quote",
+    "vendor quotes",
+    "supplier quote",
+    "supplier quotes",
+    "best supplier",
+    "best vendor",
+    "lowest quote",
+    "quotation",
+    "quotations",
+    "quoted price",
+    "commercial comparison",
+    "technical comparison"
+  ]);
   const detailSignals = containsAny(text, [
     "detail",
     "details",
@@ -570,6 +589,20 @@ function routeLocally(query) {
     };
   }
 
+  if (quoteComparisonSignals) {
+    return {
+      action: "quote_comparison",
+      normalizedEnglish: query,
+      params: {
+        requisitionId,
+        vesselKeyword,
+        keyword,
+        statusText: statusText || (containsAny(text, ["rfq", "inquiry", "quoted"]) ? statusText : ""),
+        includeRecommendation: true
+      }
+    };
+  }
+
   if ((text.includes("requisition") || text.includes("workflow log") || text.includes("delivery info")) && requisitionId) {
     return {
       action: "requisition_detail",
@@ -659,21 +692,6 @@ function routeLocally(query) {
   }
 
   if (requisitionSignals) {
-    if (!requisitionPayload) {
-      return {
-        action: "requisition_create",
-        normalizedEnglish: query,
-        params: {
-          vesselKeyword,
-          keyword: effectiveInventoryKeyword || keyword,
-          requisitionMode,
-          inventoryItemId,
-          description,
-          workflow: findNumberLike(query, /workflow\s*(?:id)?\s*[:#-]?\s*(\d+)/i)
-        }
-      };
-    }
-
     return {
       action: "requisitions_list",
       normalizedEnglish: query,
@@ -764,6 +782,23 @@ function reconcileRoute(query, aiRoute, localRoute) {
   const certificateSignals = containsAny(text, ["certificate", "survey", "expiry", "expiring"]);
   const requisitionSignals = containsAny(text, ["requisition", "purchase request", "rfq", "inquiry"]);
   const inventorySignals = containsAny(text, ["inventory", "spare", "spares", "store", "stores", "material"]);
+  const quoteComparisonSignals = containsAny(text, [
+    "compare quote",
+    "compare quotes",
+    "quote comparison",
+    "quotation comparison",
+    "vendor quote",
+    "vendor quotes",
+    "supplier quote",
+    "supplier quotes",
+    "best supplier",
+    "best vendor",
+    "lowest quote",
+    "quotation",
+    "quotations",
+    "commercial comparison",
+    "technical comparison"
+  ]);
   const purchaseSignals =
     !requisitionSignals &&
     containsAny(text, ["purchase order", "po ", "po status", "material receipt", "invoice", "goods receipt", "procurement"]);
@@ -776,7 +811,14 @@ function reconcileRoute(query, aiRoute, localRoute) {
     return local;
   }
 
-  if (requisitionSignals && !String(ai.action || "").startsWith("requisition")) {
+  if (quoteComparisonSignals && ai.action !== "quote_comparison") {
+    return local;
+  }
+
+  if (
+    requisitionSignals &&
+    !["requisitions_list", "requisition_detail", "requisition_create", "quote_comparison"].includes(String(ai.action || ""))
+  ) {
     return local;
   }
 
@@ -807,7 +849,11 @@ function reconcileRoute(query, aiRoute, localRoute) {
 }
 
 function targetSystemForAction(action, fallbackSystemKey) {
-  if (["requisitions_list", "purchase_orders_list", "requisition_detail", "requisition_create", "inventory_items"].includes(action)) {
+  if (
+    ["requisitions_list", "purchase_orders_list", "requisition_detail", "requisition_create", "inventory_items", "quote_comparison"].includes(
+      action
+    )
+  ) {
     return "purchase";
   }
 
@@ -1583,6 +1629,173 @@ function buildPurchaseOrderPresentation(result, params = {}) {
   });
 }
 
+function parseAmount(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  const match = String(value || "")
+    .replace(/,/g, "")
+    .match(/-?\d+(?:\.\d+)?/);
+  return match ? Number(match[0]) : 0;
+}
+
+function formatMoney(value, currency = "USD") {
+  const amount = Number(value || 0);
+  return `${currency} ${amount.toLocaleString("en-US", {
+    maximumFractionDigits: 0
+  })}`;
+}
+
+function numberSeed(value) {
+  return String(value || "")
+    .split("")
+    .reduce((total, char) => total + char.charCodeAt(0), 0);
+}
+
+function selectQuoteContextRow(rows, params = {}) {
+  const liveRows = Array.isArray(rows) ? rows : [];
+  if (!liveRows.length) {
+    return null;
+  }
+
+  if (params.requisitionId) {
+    const target = String(params.requisitionId);
+    const exact = liveRows.find((row) => String(row.requisitionId || row.id || "") === target);
+    if (exact) {
+      return exact;
+    }
+  }
+
+  const preferred = liveRows.find((row) =>
+    containsAny(normalize([row.currentStatus, row.requisitionNumber, row.documentHeader].filter(Boolean).join(" ")), [
+      "quote",
+      "quotation",
+      "rfq",
+      "inquiry"
+    ])
+  );
+
+  return preferred || liveRows[0];
+}
+
+function buildDemoQuoteRows(contextRow = {}) {
+  const contextKey = firstNonEmpty(contextRow.requisitionNumber, contextRow.documentHeader, contextRow.requisitionId, "live-requisition");
+  const seed = numberSeed(contextKey);
+  const base = parseAmount(contextRow.poAmountWithCurrency || contextRow.amount || contextRow.estimatedAmount) || 12000 + (seed % 3500);
+  const quoteLines = [
+    {
+      supplier: "Oceanic Marine Supply",
+      quotedAmount: Math.round(base * 1.02),
+      freight: 420 + (seed % 180),
+      discountPercent: 2,
+      deliveryDays: 12 + (seed % 4),
+      paymentTerms: "30 days",
+      technicalCompliance: "Full",
+      complianceScore: 100
+    },
+    {
+      supplier: "Global Ship Spares",
+      quotedAmount: Math.round(base * 0.97),
+      freight: 780 + (seed % 260),
+      discountPercent: 0,
+      deliveryDays: 20 + (seed % 6),
+      paymentTerms: "Advance 30%",
+      technicalCompliance: "Partial - delivery risk",
+      complianceScore: 78
+    },
+    {
+      supplier: "Nautilus Technical Trading",
+      quotedAmount: Math.round(base * 1.06),
+      freight: 350 + (seed % 140),
+      discountPercent: 3,
+      deliveryDays: 8 + (seed % 3),
+      paymentTerms: "45 days",
+      technicalCompliance: "Full",
+      complianceScore: 96
+    }
+  ].map((line) => {
+    const discount = line.quotedAmount * (line.discountPercent / 100);
+    const landedCost = Math.round(line.quotedAmount + line.freight - discount);
+    const score =
+      landedCost * 0.55 +
+      line.deliveryDays * 90 * 0.25 +
+      (100 - line.complianceScore) * 80 * 0.2;
+
+    return {
+      ...line,
+      discount,
+      landedCost,
+      score
+    };
+  });
+
+  return quoteLines
+    .sort((left, right) => left.score - right.score)
+    .map((line, index) => ({
+      ...line,
+      rank: index + 1,
+      recommendation: index === 0 ? "Recommended" : index === 1 ? "Commercial backup" : "Technical backup"
+    }));
+}
+
+function buildQuoteComparisonPresentation(result, contextRow, params = {}) {
+  const rows = buildDemoQuoteRows(contextRow || {});
+  const best = rows[0];
+  const highest = rows.reduce((max, row) => Math.max(max, row.landedCost), 0);
+  const requisitionLabel = firstNonEmpty(contextRow?.requisitionNumber, contextRow?.documentHeader, contextRow?.requisitionId, "live requisition");
+
+  return buildTablePresentation({
+    title: "Quote comparison",
+    subtitle: contextRow
+      ? `Live Purchase Link context: ${requisitionLabel} for ${firstNonEmpty(contextRow.vesselName, "selected vessel")}. Vendor quote lines are demo comparison values until the extracted-quotation endpoint is connected.`
+      : "No live requisition row was returned. Showing the comparison layout with demo supplier lines.",
+    columns: [
+      { key: "rank", label: "Rank" },
+      { key: "supplier", label: "Supplier" },
+      { key: "quotedAmountDisplay", label: "Quoted amount" },
+      { key: "freightDisplay", label: "Freight" },
+      { key: "discountDisplay", label: "Discount" },
+      { key: "landedCostDisplay", label: "Landed cost" },
+      { key: "deliveryDaysDisplay", label: "Delivery" },
+      { key: "paymentTerms", label: "Payment" },
+      { key: "technicalCompliance", label: "Technical" },
+      { key: "recommendation", label: "Recommendation" }
+    ],
+    rows: rows.map((row) => ({
+      id: `${contextRow?.requisitionId || "quote"}-${row.rank}`,
+      requisitionId: contextRow?.requisitionId || "",
+      requisitionNumber: requisitionLabel,
+      vesselName: contextRow?.vesselName || "",
+      rank: row.rank,
+      supplier: row.supplier,
+      quotedAmountDisplay: formatMoney(row.quotedAmount),
+      freightDisplay: formatMoney(row.freight),
+      discountDisplay: `${row.discountPercent}% (${formatMoney(row.discount)})`,
+      landedCostDisplay: formatMoney(row.landedCost),
+      deliveryDaysDisplay: `${row.deliveryDays} days`,
+      paymentTerms: row.paymentTerms,
+      technicalCompliance: row.technicalCompliance,
+      recommendation: row.recommendation,
+      raw: {
+        ...row,
+        contextRow,
+        source: "demo_quote_comparison"
+      }
+    })),
+    summary: [
+      { label: "Live rows checked", value: Array.isArray(result?.body?.data) ? result.body.data.length : 0 },
+      { label: "Requisition", value: requisitionLabel },
+      { label: "Recommended supplier", value: best?.supplier || "-" },
+      { label: "Estimated saving", value: best ? formatMoney(highest - best.landedCost) : "-" }
+    ],
+    rowActions: contextRow?.requisitionId
+      ? [{ label: "Show requisition detail", promptTemplate: "Show requisition {{requisitionId}} detail with workflow log and delivery info" }]
+      : [],
+    actionTarget: "quoteComparison"
+  });
+}
+
 function firstRecord(value) {
   if (Array.isArray(value)) {
     return value[0] || null;
@@ -2200,6 +2413,60 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
       reply: `${autoRoutedNotice}${summarizeResult(result)}`.trim(),
       result,
       presentation: result.ok ? buildCertificatePresentation(result, routed.params || {}) : null
+    };
+  }
+
+  if (action === "quote_comparison") {
+    if (effectiveSystemKey !== "purchase") {
+      return {
+        intent: "Quote comparison",
+        normalizedEnglish,
+        reply: "Quote comparison belongs to Purchase Link. Switch the active system to Purchase Link for this request.",
+        result: null,
+        presentation: null
+      };
+    }
+
+    const trackingParams = {
+      track: "Requisition Track",
+      keyword: routed.params?.keyword || routed.params?.vesselKeyword || ""
+    };
+    const result = await client.procurementFollowUp(
+      effectiveSystemKey,
+      effectiveSession,
+      buildPurchaseTrackingQuery(trackingParams)
+    );
+    let liveRows = Array.isArray(result.body?.data) ? result.body.data : [];
+    if (result.ok && routed.params?.statusText) {
+      const statusRows = applyPurchaseStatusFilter(liveRows, routed.params.statusText);
+      if (statusRows.length) {
+        liveRows = statusRows;
+        result.body.data = statusRows;
+      }
+    }
+
+    const contextRow = result.ok ? selectQuoteContextRow(liveRows, routed.params || {}) : null;
+    const presentation = result.ok ? buildQuoteComparisonPresentation(result, contextRow, routed.params || {}) : null;
+    const contextText = contextRow
+      ? `I used live Purchase Link requisition ${firstNonEmpty(
+          contextRow.requisitionNumber,
+          contextRow.documentHeader,
+          contextRow.requisitionId
+        )} as the comparison context. `
+      : "";
+
+    return {
+      intent: "Quote comparison",
+      normalizedEnglish,
+      reply:
+        `${autoRoutedNotice}${contextText}${summarizeResult(result)} Review the ranked supplier comparison and recommendation below.`.trim(),
+      result: {
+        source: result,
+        liveRequisition: contextRow,
+        note:
+          "Supplier quote lines are demo comparison values. Connect the extracted quotation endpoint to replace these with live supplier quotations."
+      },
+      presentation
     };
   }
 

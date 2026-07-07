@@ -214,6 +214,7 @@ const samplePrompts = [
   "List requisitions in PO SEND status.",
   "Show purchase orders and material receipt status.",
   "Show requisition 17209 detail with workflow log and delivery info.",
+  "Compare vendor quotes for any live requisition and recommend the best supplier.",
   "List spare inventory items for vessel Alkebulan.",
   "Find store items for vessel Alkebulan matching fuel pump.",
   "Create requisition for inventory item 2588 on vessel Alkebulan.",
