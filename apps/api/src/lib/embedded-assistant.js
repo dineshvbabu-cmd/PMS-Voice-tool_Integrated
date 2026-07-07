@@ -148,6 +148,12 @@ function createEmbeddedAssistantPlan({ query, pageContext = {}, userContext = {}
       blockSeparateWindow: true,
       anchorRoute: page.route
     },
+    dataPolicy: {
+      liveProductionDataOnly: true,
+      askClarifyingQuestionWhenContextMissing: true,
+      neverInventOperationalRecords: true,
+      useCurrentMazikPageContext: true
+    },
     api: {
       queryEndpoint: "/api/copilot/query",
       confirmEndpoint: "/api/copilot/confirm",
@@ -195,6 +201,12 @@ function createEmbeddedManifest() {
       default: "right_drawer",
       supported: ["right_drawer", "modal_popup", "inline_page_panel"],
       separateWindowAllowed: false
+    },
+    dataPolicy: {
+      liveProductionDataOnly: true,
+      askClarifyingQuestionWhenContextMissing: true,
+      neverInventOperationalRecords: true,
+      useCurrentMazikPageContext: true
     },
     pageCatalog,
     events: [

@@ -220,8 +220,7 @@ const samplePrompts = [
   "Find store items for vessel Alkebulan matching fuel pump.",
   "Create requisition for inventory item 2588 on vessel Alkebulan.",
   "Close ship component job link 82225 completed on 2026-05-26 with remarks valve checked satisfactory.",
-  "Postpone ship component job link 82225 until 2026-06-10 with reason 5, approver 152, and remarks awaiting spares.",
-  "Create requisition with payload {\"Requisition\":{\"vesselId\":203,\"description\":\"Class occasional survey service\"},\"items\":[],\"templateItems\":[],\"workflow\":\"1\"}."
+  "Postpone ship component job link 82225 until 2026-06-10 with reason 5, approver 152, and remarks awaiting spares."
 ];
 
 module.exports = {

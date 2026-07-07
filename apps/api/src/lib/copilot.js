@@ -748,9 +748,11 @@ function routeLocally(query) {
   }
 
   return {
-    action: "maintenance_list",
+    action: "help",
     normalizedEnglish: query,
-    params: {}
+    params: {
+      needsClarification: true
+    }
   };
 }
 
@@ -802,6 +804,20 @@ function reconcileRoute(query, aiRoute, localRoute) {
   const purchaseSignals =
     !requisitionSignals &&
     containsAny(text, ["purchase order", "po ", "po status", "material receipt", "invoice", "goods receipt", "procurement"]);
+
+  if (
+    local.action === "help" &&
+    local.params?.needsClarification &&
+    !maintenanceSignals &&
+    !defectSignals &&
+    !certificateSignals &&
+    !requisitionSignals &&
+    !inventorySignals &&
+    !quoteComparisonSignals &&
+    !purchaseSignals
+  ) {
+    return local;
+  }
 
   if (defectSignals && ai.action !== "defects_list") {
     return local;
@@ -1257,6 +1273,15 @@ function buildPayloadPresentation(title, message, payload, missingFields, action
     detailSectionTitle: options.detailSectionTitle || "",
     reviewSectionTitle: options.reviewSectionTitle || "",
     contextSectionTitle: options.contextSectionTitle || "Additional context"
+  };
+}
+
+function buildClarificationPresentation(title, message, fields = []) {
+  return {
+    type: "detail",
+    title,
+    subtitle: message,
+    fields: compactFields(fields)
   };
 }
 
@@ -2190,6 +2215,28 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
     effectiveSystemKey !== systemKey && effectiveSession ? `I automatically used ${targetSystem} for this request. ` : "";
 
   if (action === "help") {
+    if (routed.params?.needsClarification) {
+      return {
+        intent: "More detail needed",
+        normalizedEnglish,
+        reply:
+          "I need one more detail before calling production data. Tell me whether this is PMS maintenance, defects, certificates, Purchase requisitions, inventory, PO/material receipt, or quote comparison.",
+        result: {
+          needsClarification: true,
+          missingFields: ["productionArea"]
+        },
+        presentation: buildClarificationPresentation(
+          "Choose production area",
+          "I will fetch live Mazik data after you tell me which PMS or Purchase area to use.",
+          [
+            buildField("PMS options", "maintenance, defects, certificates, close job, postpone job"),
+            buildField("Purchase options", "requisitions, inventory/spares, purchase orders, material receipts, quote comparison"),
+            buildField("Example", "Show overdue critical maintenance for vessel Holmes")
+          ]
+        )
+      };
+    }
+
     return {
       intent: "Capabilities",
       normalizedEnglish,
@@ -2539,7 +2586,15 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
           ? `Please name the vessel for the requisition inventory search. Available examples: ${search.availableVessels.join(", ")}.`
           : "Please name the vessel for the requisition inventory search.",
         result: search.result,
-        presentation: null
+        presentation: buildClarificationPresentation(
+          "Vessel needed",
+          "I need the vessel before I can search live Purchase Link inventory or stores.",
+          [
+            buildField("Missing", "Vessel name"),
+            buildField("Available examples", search.availableVessels?.join(", ")),
+            buildField("Try", "Find spare inventory items for vessel Alkebulan matching fuel pump")
+          ]
+        )
       };
     }
 
@@ -2575,7 +2630,10 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
           summarizeResult(search.result),
           routed.params || {},
           ["shipComponentJobLinkId"],
-          buildPayloadPresentation("Close maintenance draft", summarizeResult(search.result), routed.params || {}, ["shipComponentJobLinkId"], "close_job")
+          buildClarificationPresentation("Job selection needed", summarizeResult(search.result), [
+            buildField("Missing", "Ship component job link id or exact job/component/vessel match"),
+            buildField("Try", "Close job for vessel Holmes component non return valve completed today with remarks checked satisfactory")
+          ])
         );
       }
 
@@ -2603,7 +2661,10 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
         context.error,
         routed.params || {},
         ["shipComponentJobLinkId"],
-        buildPayloadPresentation("Close maintenance draft", context.error, routed.params || {}, ["shipComponentJobLinkId"], "close_job")
+        buildClarificationPresentation("Job selection needed", context.error, [
+          buildField("Missing", "Numeric ship component job link id"),
+          buildField("Try", "Close ship component job link 82225 completed on 2026-05-26 with remarks valve checked satisfactory")
+        ])
       );
     }
 
@@ -2634,7 +2695,7 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
     return buildPendingConfirmation(
       "Close maintenance ready",
       normalizedEnglish,
-      `${autoRoutedNotice}I parsed the live maintenance completion payload. Confirm in the UI to submit it to Mazik.`.trim(),
+      `${autoRoutedNotice}I prepared the maintenance completion from the live PMS record. Confirm in the UI to submit it to Mazik.`.trim(),
       {
         action: "close_job",
         systemKey: effectiveSystemKey,
@@ -2677,7 +2738,10 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
           summarizeResult(search.result),
           routed.params || {},
           ["shipComponentJobLinkId"],
-          buildPayloadPresentation("Postponement draft", summarizeResult(search.result), routed.params || {}, ["shipComponentJobLinkId"], "postponement")
+          buildClarificationPresentation("Job selection needed", summarizeResult(search.result), [
+            buildField("Missing", "Ship component job link id or exact job/component/vessel match"),
+            buildField("Try", "Postpone pump overhaul on vessel Holmes until 2026-08-10 with reason 5, approver 152, remarks awaiting spares")
+          ])
         );
       }
 
@@ -2705,7 +2769,10 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
         context.error,
         routed.params || {},
         ["shipComponentJobLinkId"],
-        buildPayloadPresentation("Postponement draft", context.error, routed.params || {}, ["shipComponentJobLinkId"], "postponement")
+        buildClarificationPresentation("Job selection needed", context.error, [
+          buildField("Missing", "Numeric ship component job link id"),
+          buildField("Try", "Postpone ship component job link 82225 until 2026-08-10 with reason 5, approver 152, remarks awaiting spares")
+        ])
       );
     }
 
@@ -2736,7 +2803,7 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
     return buildPendingConfirmation(
       "Postponement ready",
       normalizedEnglish,
-      `${autoRoutedNotice}I parsed the live postponement payload. Confirm in the UI to submit it to Mazik.`.trim(),
+      `${autoRoutedNotice}I prepared the postponement from the live PMS record. Confirm in the UI to submit it to Mazik.`.trim(),
       {
         action: "postponement",
         systemKey: effectiveSystemKey,
@@ -2780,7 +2847,15 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
             ? `Please name the vessel for the requisition. Available examples: ${search.availableVessels.join(", ")}.`
             : "Please name the vessel for the requisition.",
           result: search.result,
-          presentation: null
+          presentation: buildClarificationPresentation(
+            "Vessel needed",
+            "I need the vessel before I can search live inventory and prepare a Purchase Link requisition.",
+            [
+              buildField("Missing", "Vessel name"),
+              buildField("Available examples", search.availableVessels?.join(", ")),
+              buildField("Try", "Create requisition for vessel Alkebulan for fuel pump spare")
+            ]
+          )
         };
       }
 
@@ -2791,7 +2866,10 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
           summarizeResult(search.result),
           routed.params || {},
           ["inventoryItemId"],
-          buildPayloadPresentation("Requisition draft", summarizeResult(search.result), routed.params || {}, ["inventoryItemId"], "requisition_create")
+          buildClarificationPresentation("Inventory item needed", summarizeResult(search.result), [
+            buildField("Missing", "Live inventory/spare/store item"),
+            buildField("Try", "Find spare inventory items for vessel Alkebulan matching fuel pump")
+          ])
         );
       }
 
@@ -2885,9 +2963,17 @@ async function executeCopilotQuery({ client, session, sessions, query, systemKey
   return {
     intent: "Capabilities",
     normalizedEnglish,
-    reply: "I could not classify that request confidently. Try one of the sample prompts.",
+    reply: "I could not classify that request confidently. Tell me whether this is PMS maintenance, defects, certificates, Purchase requisitions, inventory, PO/material receipt, or quote comparison, and I will fetch live Mazik data for that area.",
     result: null,
-    presentation: null
+    presentation: buildClarificationPresentation(
+      "More detail needed",
+      "Tell me which production area to use, then I will fetch live Mazik data from that screen or API.",
+      [
+        buildField("PMS examples", "overdue maintenance, defects, certificates, close job, postpone job"),
+        buildField("Purchase examples", "requisitions, inventory/spares, purchase orders, material receipts, quote comparison"),
+        buildField("Try", "Show overdue critical maintenance for vessel Holmes")
+      ]
+    )
   };
 }
 

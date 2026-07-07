@@ -74,6 +74,9 @@ Operational Database
 - Write requests always produce drafts first.
 - Confirmed write requests must include user ID, tenant ID, source page, payload hash, and visible review fields.
 - The assistant must never silently close jobs, raise requisitions, approve quotes, postpone defects, or alter certificates.
+- The assistant must never invent operational records, supplier quotes, job details, requisitions, defects, certificates, or PO/material receipt data.
+- If the prompt is missing a vessel, job, component, requisition, quote number, item, or date needed to fetch production data, the assistant must ask a follow-up question or show live selectable candidates.
+- If a required Mazik production endpoint has not been captured yet, the assistant must say which endpoint/data is missing and stop before giving a recommendation.
 - All actions must be idempotent where possible.
 - Every AI decision must be traceable to a tool call, page context, or user confirmation.
 
