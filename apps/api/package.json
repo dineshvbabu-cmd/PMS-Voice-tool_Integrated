@@ -6,6 +6,6 @@
   "scripts": {
     "dev": "node src/server.js",
     "start": "node src/server.js",
-    "check": "node --check src/server.js && node --check src/lib/pmslink-client.js && node --check src/lib/copilot.js && node --check src/lib/inventory.js && node --check src/lib/settings.js"
+    "check": "node --check src/server.js && node --check src/lib/pmslink-client.js && node --check src/lib/copilot.js && node --check src/lib/inventory.js && node --check src/lib/embedded-assistant.js && node --check src/lib/settings.js"
   }
 }

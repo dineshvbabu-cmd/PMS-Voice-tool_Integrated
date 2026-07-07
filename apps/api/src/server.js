@@ -7,6 +7,7 @@ const { createSettings } = require("./lib/settings");
 const { pmsRoutes, purchaseRouteGroups, liveEndpoints, samplePrompts } = require("./lib/inventory");
 const { PMSLinkClient } = require("./lib/pmslink-client");
 const { executeCopilotQuery, confirmCopilotAction } = require("./lib/copilot");
+const { createEmbeddedAssistantPlan, createEmbeddedManifest } = require("./lib/embedded-assistant");
 
 const PORT = Number(process.env.PORT || 3100);
 const settings = createSettings();
@@ -323,6 +324,28 @@ const server = http.createServer(async (req, res) => {
         purchaseRouteGroups,
         liveEndpoints
       });
+      return;
+    }
+
+    if (req.method === "GET" && parsedUrl.pathname === "/api/embedded/manifest") {
+      sendJson(req, res, 200, createEmbeddedManifest());
+      return;
+    }
+
+    if (req.method === "POST" && parsedUrl.pathname === "/api/embedded/plan") {
+      const rawBody = await readBody(req);
+      const body = rawBody ? JSON.parse(rawBody) : {};
+
+      sendJson(
+        req,
+        res,
+        200,
+        createEmbeddedAssistantPlan({
+          query: body.query || "",
+          pageContext: body.pageContext || {},
+          userContext: body.userContext || {}
+        })
+      );
       return;
     }
 

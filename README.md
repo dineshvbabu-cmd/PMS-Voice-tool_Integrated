@@ -23,8 +23,20 @@ apps/
 docs/
   INTEGRATION_NOTES.md
   MAZIK_LIVE_ENDPOINT_INVENTORY.md
+  PRODUCTION_EMBEDDED_ASSISTANT_MVP.md
   RAILWAY_SPLIT_DEPLOYMENT.md
 ```
+
+## Production Embedded Assistant Plan
+
+The next product direction is an assistant embedded directly inside Mazik PMS Link and Purchase Link, rather than only running as a standalone demo page.
+
+- [docs/PRODUCTION_EMBEDDED_ASSISTANT_MVP.md](docs/PRODUCTION_EMBEDDED_ASSISTANT_MVP.md)
+
+New embedded contracts are available from the API:
+
+- `GET /api/embedded/manifest`
+- `POST /api/embedded/plan`
 
 ## Local Development
 
